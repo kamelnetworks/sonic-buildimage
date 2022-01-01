@@ -1,8 +1,8 @@
 # SONiC make file
 
 NOJESSIE ?= 1
-NOSTRETCH ?= 0
-NOBUSTER ?= 0
+NOSTRETCH ?= 1
+NOBUSTER ?= 1
 NOBULLSEYE ?= 0
 
 override Q := @
