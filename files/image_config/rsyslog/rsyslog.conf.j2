@@ -38,11 +38,21 @@ $UDPServerRun 514
 
 # Define a custom template
 $template SONiCFileFormat,"%timegenerated%.%timegenerated:::date-subseconds% %HOSTNAME% %syslogseverity-text:::uppercase% %syslogtag%%msg:::sp-if-no-1st-sp%%msg:::drop-last-lf%\n"
+# Use RFC3164 compatible format for remote syslog
+$template SONiCRemoteFormat,"<%PRI%>%TIMESTAMP:::date-rfc3339% %HOSTNAME% %syslogtag%%msg:::sp-if-no-1st-sp%%msg:::drop-last-lf%\n"
 $ActionFileDefaultTemplate SONiCFileFormat
 
 #Set remote syslog server
 {% for server in SYSLOG_SERVER %}
-*.* @[{{ server }}]:514;SONiCFileFormat
+*.* action(type="omfwd"
+  template="SONiCRemoteFormat"
+  target="{{ server }}"
+  port="{{SYSLOG_SERVER[server].get("port", 514)}}"
+  protocol="{{SYSLOG_SERVER[server].get("protocol", "udp")}}"
+{% if 'vrf' in SYSLOG_SERVER[server] %}
+  device="{{SYSLOG_SERVER[server]["vrf"]}}"
+{% endif %}
+  )
 {% endfor %}
 
 #
