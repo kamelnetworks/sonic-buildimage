@@ -91,6 +91,9 @@ $RepeatedMsgReduction on
 # Remote syslog logging
 #
 
+# Use RFC3164 compatible format for remote syslog
+$template SONiCRemoteFormat,"<%PRI%>%TIMESTAMP:::date-rfc3339% %HOSTNAME% %syslogtag%%msg:::sp-if-no-1st-sp%%msg:::drop-last-lf%\n"
+
 # The omfwd plug-in provides the core functionality of traditional message forwarding via UDP and plain TCP.
 # It is a built-in module that does not need to be loaded.
 
@@ -107,9 +110,9 @@ $RepeatedMsgReduction on
 {% set dummy = params_list.append('device=' + '"' + data.vrf|string + '"') %}
 {% endif %}
 {% if params_list %}
-*.* action(type="omfwd" target="{{ server }}" protocol="udp" {{ params_list|join(' ') }} template="SONiCFileFormat")
+*.* action(type="omfwd" target="{{ server }}" protocol="udp" {{ params_list|join(' ') }} template="SONiCRemoteFormat")
 {% else %}
-*.* action(type="omfwd" target="{{ server }}" protocol="udp" template="SONiCFileFormat")
+*.* action(type="omfwd" target="{{ server }}" protocol="udp" template="SONiCRemoteFormat")
 {% endif %}
 {% endfor %}
 {% endif %}
