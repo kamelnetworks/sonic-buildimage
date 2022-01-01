@@ -1,0 +1,134 @@
+# Upgrades the package versions via pull request
+
+resources:
+  repositories:
+  - repository: buildimage
+    type: github
+    name: kamelnetworks/sonic-buildimage
+    endpoint: github
+    ref: 202211
+
+trigger: none
+pr: none
+
+pool: sonicbld
+
+stages:
+- stage: Prepare
+  jobs:
+  - job: Prepare
+    steps:
+    - script: |
+        DEFAULT_MIRROR_URL_PREFIX=http://packages.trafficmanager.net
+        DEBIAN_TIMESTAMP=$(curl $DEFAULT_MIRROR_URL_PREFIX/snapshot/debian/latest/timestamp)
+        DEBIAN_SECURITY_TIMESTAMP=$(curl $DEFAULT_MIRROR_URL_PREFIX/snapshot/debian-security/latest/timestamp)
+        echo "DEBIAN_TIMESTAMP=$DEBIAN_TIMESTAMP, DEBIAN_SECURITY_TIMESTAMP=$DEBIAN_SECURITY_TIMESTAMP"
+        echo "##vso[task.setvariable variable=DEBIAN_TIMESTAMP;isOutput=true]$DEBIAN_TIMESTAMP"
+        echo "##vso[task.setvariable variable=DEBIAN_SECURITY_TIMESTAMP;isOutput=true]$DEBIAN_SECURITY_TIMESTAMP"
+      name: SetVersions
+      displayName: 'Set snapshot versions'
+- stage: Build
+  dependsOn: Prepare
+  variables:
+    - name: CACHE_MODE
+      value: none
+    - name: VERSION_CONTROL_OPTIONS
+      value: 'SONIC_VERSION_CONTROL_COMPONENTS='
+    - name: SKIP_CHECKOUT
+      value: true
+    - name: DEBIAN_TIMESTAMP
+      value: $[ stageDependencies.Prepare.Prepare.outputs['SetVersions.DEBIAN_TIMESTAMP'] ]
+    - name: DEBIAN_SECURITY_TIMESTAMP
+      value: $[ stageDependencies.Prepare.Prepare.outputs['SetVersions.DEBIAN_SECURITY_TIMESTAMP'] ]
+    - name: SONIC_BUILD_RETRY_COUNT
+      value: 3
+    - name: SONIC_BUILD_RETRY_INTERVAL
+      value: 600
+    - name: NOSTRETCH  # Disable legacy Debian stretch containers, no services we care about use it
+      value: 1
+    - name: NOBUSTER  # Disable legacy Debian buster containers, we have upgraded the containers
+      value: 1
+    - name: SONIC_SLAVE_DOCKER_DRIVER
+      value: overlay2
+    - name: REGISTRY_SERVER_PATH
+      value: /kamelnetworks/
+    - name: REGISTRY_SERVER
+      value: quay.io
+    - name: ENABLE_FIPS_FEATURE  # Disable custom FIPS packages, use conventional ones
+      value: n
+    - name: QUIET
+      value: n
+  jobs:
+  - template: azure-pipelines-build.yml
+    parameters:
+      buildOptions: '${{ variables.VERSION_CONTROL_OPTIONS }} ENABLE_DOCKER_BASE_PULL=n SONIC_BUILD_JOBS=$(nproc) ENABLE_IMAGE_SIGNATURE=y'
+      preSteps:
+      - template: .azure-pipelines/template-clean-sonic-slave.yml@buildimage
+      - checkout: self
+        submodules: recursive
+        fetchDepth: 0
+        path: s
+        displayName: 'Checkout code'
+      - script: |
+          echo "DEBIAN_TIMESTAMP=$DEBIAN_TIMESTAMP, DEBIAN_SECURITY_TIMESTAMP=$DEBIAN_SECURITY_TIMESTAMP"
+          if [ "$MIRROR_SNAPSHOT" == y ]; then
+            mkdir -p target/versions/default/
+            echo "debian==$DEBIAN_TIMESTAMP" > target/versions/default/versions-mirror
+            echo "debian-security==$DEBIAN_SECURITY_TIMESTAMP" >> target/versions/default/versions-mirror
+            cat target/versions/default/versions-mirror
+          fi
+        displayName: 'Set snapshot versions'
+      jobGroups:
+        - name: broadcom
+          variables:
+            swi_image: no
+            platform_rpc: brcm
+        - name: mellanox
+          variables:
+            platform_rpc: mlnx
+        - name: innovium
+          variables:
+            platform_rpc: invm
+
+- stage: UpgradeVersions
+  jobs:
+  - job: UpgradeVersions
+    pool:
+      vmImage: 'ubuntu-20.04'
+    steps:
+    - checkout: self
+      displayName: 'Checkout code'
+    - download: current
+      patterns: '**/versions-*'
+    - script: |
+        mkdir -p target
+        default_platform=broadcom
+        artifacts=$(find $(Pipeline.Workspace) -maxdepth 1 -type d -name 'sonic-buildimage.*' | grep -v "sonic-buildimage.${default_platform}")
+        cp -r $(Pipeline.Workspace)/sonic-buildimage.${default_platform}/target/versions target/
+        echo "Freezing ${default_platform}"
+        make freeze FREEZE_VERSION_OPTIONS=-r
+        ordered_artifacts=$(echo "$artifacts" | grep -v -E "arm64|armhf" && echo "$artifacts" | grep -E "arm64|armhf")
+        for artifact in $ordered_artifacts
+        do
+          echo "Freezing ${artifact}"
+          rm -rf target/versions
+          cp -r $artifact/target/versions target/
+          OPTIONS="-a -d"
+          [[ "$artifact" == *arm64* || "$artifact" == *armhf* ]] && OPTIONS="-d"
+          make freeze FREEZE_VERSION_OPTIONS="$OPTIONS"
+        done
+        git config user.name DevOpsCI
+        git config user.email devops@kamel.network
+        git diff files/build/versions
+        git add files/build/versions
+        git commit -m "[ci/build]: Upgrade SONiC package versions"
+        mkdir -p tmp/versions
+        git format-patch --stdout HEAD~1 > tmp/versions/versions.patch
+      displayName: 'Freeze Versions'
+    - publish: $(System.DefaultWorkingDirectory)/files/build/versions
+      artifact: 'sonic-buildimage.versions'
+      displayName: 'Archive SONiC package versions'
+    - publish: $(System.DefaultWorkingDirectory)/tmp/versions
+      artifact: 'sonic-buildimage.versions.patch'
+      displayName: 'Archive SONiC package versions patch'
+

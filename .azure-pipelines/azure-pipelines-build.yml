@@ -118,7 +118,6 @@ jobs:
 
     buildSteps:
       - template: .azure-pipelines/template-skipvstest.yml@buildimage
-      - template: .azure-pipelines/template-daemon.yml@buildimage
       - bash: |
           set -ex
           if [ $(GROUP_NAME) == vs ]; then
@@ -138,6 +137,7 @@ jobs:
               rm target/sonic-vs.img
             fi
           else
+            make $BUILD_OPTIONS target/sonic-$(GROUP_NAME).bin
             if [ $(dbg_image) == yes ]; then
               make  $BUILD_OPTIONS INSTALL_DEBUG_TOOLS=y target/sonic-$(GROUP_NAME).bin
               mv target/sonic-$(GROUP_NAME).bin target/sonic-$(GROUP_NAME)-dbg.bin
@@ -169,7 +169,6 @@ jobs:
               make $BUILD_OPTIONS ENABLE_SYNCD_RPC=y target/sonic-$(GROUP_NAME).bin
               mv target/sonic-mellanox.bin target/sonic-$(GROUP_NAME)-rpc.bin
             fi
-            make $BUILD_OPTIONS target/sonic-$(GROUP_NAME).bin
           fi
         displayName: "Build sonic image"
       - template: .azure-pipelines/check-dirty-version.yml@buildimage
