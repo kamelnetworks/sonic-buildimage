@@ -62,11 +62,6 @@ jobs:
         condition: or(failed(), canceled())
         artifact: 'sonic-buildimage.$(GROUP_NAME)$(GROUP_EXTNAME)$(System.JobAttempt)'
         displayName: "Archive failed sonic image"
-      - ${{ if ne(variables['Build.Reason'], 'PullRequest') }}:
-        - template: trigger-publish-artifacts-build.yml
-          parameters:
-            artifactName: 'sonic-buildimage.$(GROUP_NAME)$(GROUP_EXTNAME)'
-            publishPrefix: '$(Build.DefinitionName)/$(Build.SourceBranchName)/$(GROUP_NAME)'
       - ${{ parameters.postSteps }}
       - template: .azure-pipelines/cleanup.yml@buildimage
     jobGroups: ${{ parameters.jobGroups }}

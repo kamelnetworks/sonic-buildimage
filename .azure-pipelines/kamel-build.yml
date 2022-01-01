@@ -1,0 +1,119 @@
+# Import:
+# az pipelines create \
+#   --organization https://dev.azure.com/kamel-networks \
+#   --project sonic \
+#   --name 'sonic-buildimage.kamel' \
+#   --description 'Build for SONiC' \
+#   --repository https://github.com/kamelnetworks/sonic-buildimage \
+#   --branch master \
+#   --yml-path .azure-pipelines/kamel-build.yml
+#
+# The VMSS pool uses Ubuntu 20.04 with the following cloud-init:
+# #cloud-config
+# disk_setup:
+#   /dev/disk/azure/scsi1/lun1:
+#     table_type: gpt
+#     layout: True
+#     overwrite: True
+#   /dev/disk/azure/scsi1/lun2:
+#     table_type: gpt
+#     layout: True
+#     overwrite: True
+# fs_setup:
+#   - device: /dev/disk/azure/scsi1/lun1
+#     label: agent_disk
+#     partition: 1
+#     filesystem: btrfs
+#   - device: /dev/disk/azure/scsi1/lun2
+#     label: docker_disk
+#     partition: 1
+#     filesystem: btrfs
+# mounts:
+#   - [ /dev/disk/by-label/agent_disk, /agent ]
+#   - [ /dev/disk/by-label/docker_disk, /var/lib/docker ]
+
+
+resources:
+  repositories:
+  - repository: buildimage
+    type: github
+    name: kamelnetworks/sonic-buildimage
+    endpoint: github
+    ref: 202211
+
+trigger: none
+pr: none
+
+stages:
+- stage: Build
+  pool: sonicbld
+  variables:
+  - name: CACHE_MODE
+    value: none
+  - name: SONIC_BUILD_RETRY_COUNT
+    value: 3
+  - name: SONIC_BUILD_RETRY_INTERVAL
+    value: 600
+  - name: NOSTRETCH  # Disable legacy Debian stretch containers, no services we care about use it
+    value: 1
+  - name: NOBUSTER  # Disable legacy Debian buster containers, we have upgraded the containers
+    value: 1
+  - name: SONIC_SLAVE_DOCKER_DRIVER
+    value: overlay2
+  - name: VERSION_CONTROL_OPTIONS
+    value: 'SONIC_VERSION_CONTROL_COMPONENTS=deb,py3,web,git,docker'
+  - name: REGISTRY_SERVER_PATH
+    value: /kamelnetworks/
+  - name: REGISTRY_SERVER
+    value: quay.io
+  - name: ENABLE_DOCKER_BASE_PULL
+    value: y
+  jobs:
+  - template: azure-pipelines-build.yml
+    parameters:
+      buildOptions: 'USERNAME=admin SONIC_BUILD_JOBS=$(nproc) ${{ variables.VERSION_CONTROL_OPTIONS }}'
+      preSteps:
+      - script: |
+          # Install build dependencies
+          sudo apt-get update
+          sudo apt-get install -y python3-pip ca-certificates curl gnupg lsb-release make
+          sudo pip3 install j2cli
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+          echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
+             $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+          sudo chmod 666 /var/run/docker.sock
+        displayName: 'Install dependencies'
+      postSteps:
+      - script: |
+          image_tag="$(SONIC_VERSION_CONTROL_COMPONENTS=all make showtag | awk '/sonic-slave-bullseye:/')"
+          docker tag "${image_tag}" "quay.io/kamelnetworks/${image_tag}"
+          docker push "quay.io/kamelnetworks/${image_tag}"|| true
+        displayName: 'Upload build container to quay.io'
+      - task: GitHubRelease@1
+        displayName: Make Github release with artifacts
+        inputs:
+          gitHubConnection: github
+          repositoryName: kamelnetworks/sonic-buildimage
+          action: create
+          tagSource: userSpecifiedTag
+          tag: 'build-$(Build.BuildId)-$(GROUP_NAME)'
+          title: 'v$(Build.BuildId) - $(GROUP_NAME)'
+          isPreRelease: true
+          addChangeLog: false
+          releaseNotesSource: inline
+          releaseNotesInline: 'Build version `SONiC.$(Build.SourceBranchName)-kamel.$(Build.BuildId)-$(Build.SourceVersion)`'
+          assets: |
+            $(Build.ArtifactStagingDirectory)/target/sonic-broadcom.*
+            $(Build.ArtifactStagingDirectory)/target/sonic-aboot-broadcom.*
+            $(Build.ArtifactStagingDirectory)/target/sonic-mellanox.*
+      jobGroups:
+        - name: broadcom
+          variables:
+            swi_image: yes
+            platform_rpc: brcm
+        - name: mellanox
+          variables:
+            platform_rpc: mlnx

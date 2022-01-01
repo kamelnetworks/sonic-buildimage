@@ -5,6 +5,8 @@ FROM sonic-slave-bullseye:${slave_base_tag_ref}
 FROM sonic-slave-bullseye-march-{{ CONFIGURED_ARCH }}:${slave_base_tag_ref}
 {%- endif %}
 
+LABEL quay.expires-after=90d
+
 # Add user
 ARG user
 ARG uid
