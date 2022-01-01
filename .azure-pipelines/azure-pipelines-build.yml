@@ -118,7 +118,6 @@ jobs:
 
     buildSteps:
       - template: .azure-pipelines/template-skipvstest.yml@buildimage
-      - template: .azure-pipelines/template-daemon.yml@buildimage
       - bash: |
           set -ex
           if [ $(GROUP_NAME) == vs ]; then

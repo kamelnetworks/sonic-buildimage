@@ -1,0 +1,145 @@
+# Import:
+# az pipelines create \
+#   --organization https://dev.azure.com/kamel-networks \
+#   --project sonic \
+#   --name 'sonic-buildimage.kamel' \
+#   --description 'Build for SONiC' \
+#   --repository https://github.com/kamelnetworks/sonic-buildimage \
+#   --branch master \
+#   --yml-path .azure-pipelines/kamel-build.yml
+#
+# The VMSS pool uses Ubuntu 20.04 with the following cloud-init:
+# #cloud-config
+# disk_setup:
+#   /dev/disk/azure/scsi1/lun1:
+#     table_type: gpt
+#     layout: True
+#     overwrite: True
+#   /dev/disk/azure/scsi1/lun2:
+#     table_type: gpt
+#     layout: True
+#     overwrite: True
+# fs_setup:
+#   - device: /dev/disk/azure/scsi1/lun1
+#     label: agent_disk
+#     partition: 1
+#     filesystem: btrfs
+#   - device: /dev/disk/azure/scsi1/lun2
+#     label: docker_disk
+#     partition: 1
+#     filesystem: btrfs
+# mounts:
+#   - [ /dev/disk/by-label/agent_disk, /agent ]
+#   - [ /dev/disk/by-label/docker_disk, /var/lib/docker ]
+
+
+resources:
+  repositories:
+  - repository: buildimage
+    type: github
+    name: kamelnetworks/sonic-buildimage
+    endpoint: github
+    ref: 202211
+
+trigger: none
+pr: none
+
+stages:
+- stage: Build
+  pool: sonicbld
+  variables:
+  - name: CACHE_MODE
+    value: none
+  - name: SONIC_BUILD_RETRY_COUNT
+    value: 3
+  - name: SONIC_BUILD_RETRY_INTERVAL
+    value: 600
+  - name: NOSTRETCH  # Disable legacy Debian stretch containers, no services we care about use it
+    value: 1
+  - name: NOBUSTER  # Disable legacy Debian buster containers, we have upgraded the containers
+    value: 1
+  - name: SONIC_SLAVE_DOCKER_DRIVER
+    value: overlay2
+  - name: VERSION_CONTROL_OPTIONS
+    value: 'SONIC_VERSION_CONTROL_COMPONENTS=deb,py3,web,git,docker'
+  - name: REGISTRY_SERVER_PATH
+    value: /kamelnetworks/
+  - name: REGISTRY_SERVER
+    value: quay.io
+  - name: ENABLE_DOCKER_BASE_PULL
+    value: y
+  - name: ENABLE_FIPS_FEATURE  # Disable custom FIPS packages, use conventional ones
+    value: n
+  - name: QUIET
+    value: n
+  - name: BUILD_LOG_TIMESTAMP
+    value: simple
+  jobs:
+  - template: azure-pipelines-build.yml
+    parameters:
+      buildOptions: 'USERNAME=admin SONIC_BUILD_JOBS=$(nproc) ${{ variables.VERSION_CONTROL_OPTIONS }}'
+      preSteps:
+        - script: |
+            # Check build dependencies
+            set -xe
+            which j2
+            which make
+            docker info
+          displayName: 'Verify dependencies'
+      jobGroups:
+        - name: broadcom
+          variables:
+            swi_image: yes
+            platform_rpc: brcm
+            dbg_image: yes
+        - name: mellanox
+          variables:
+            platform_rpc: mlnx
+            dbg_image: yes
+        - name: innovium
+          variables:
+            platform_rpc: invm
+            dbg_image: yes
+
+- stage: MakeRelease
+  pool: sonicbld
+  jobs:
+  - job: MakeRelease
+    steps:
+    - checkout: self
+      displayName: 'Checkout code'
+    - download: current
+      patterns: |
+        **/target/docker-*-dbg.gz
+        **/target/sonic-broadcom.*
+        **/target/sonic-aboot-broadcom.*
+        **/target/sonic-mellanox.*
+        **/target/sonic-innovium.*
+    - script: |
+        cd $(Pipeline.Workspace)/
+        # Example:
+        # mv sonic-buildimage.innovium/target/docker-macsec-dbg.gz docker-innovium-macsec-dbg.tar.gz
+        find sonic-buildimage.*/ -name \*-dbg.gz -type f \
+          -exec sh -c "new=\$(echo '{}' | sed -E 's/sonic-buildimage\.([^\\/]+)\\/target\\/docker-([^.]+)\.gz/docker-\1-\2.tar.gz/gm;t'); mv {} \$new" \;
+      displayName: 'Flatten debug image filenames'
+    - task: GitHubRelease@1
+      displayName: Make Github release with artifacts
+      inputs:
+        gitHubConnection: github
+        repositoryName: kamelnetworks/sonic-buildimage
+        action: create
+        tagSource: userSpecifiedTag
+        tag: 'build-$(Build.SourceBranchName)-$(Build.BuildId)'
+        title: '$(Build.SourceBranchName)-v$(Build.BuildId)'
+        isPreRelease: true
+        addChangeLog: true
+        changeLogCompareToRelease: lastNonDraftRelease
+        releaseNotesSource: inline
+        releaseNotesInline: 'Build version `SONiC.$(Build.SourceBranchName)-kamel.$(Build.BuildId)-$(Build.SourceVersion)`'
+        assets: |
+          $(Pipeline.Workspace)/**/target/sonic-broadcom.*
+          $(Pipeline.Workspace)/**/target/sonic-aboot-broadcom.*
+          $(Pipeline.Workspace)/**/target/sonic-mellanox.*
+          $(Pipeline.Workspace)/**/target/sonic-innovium.*
+          $(Pipeline.Workspace)/docker-*-dbg.tar.gz
+
