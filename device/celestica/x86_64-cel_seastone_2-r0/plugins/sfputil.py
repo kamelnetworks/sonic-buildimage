@@ -50,13 +50,13 @@ class SfpUtil(SfpUtilBase):
             self._port_name = "SFP" + str(port_num - self.QSFP_PORT_END)
         return self._port_name
 
-    # def get_eeprom_dom_raw(self, port_num):
-    #     if port_num in self.qsfp_ports:
-    #         # QSFP DOM EEPROM is also at addr 0x50 and thus also stored in eeprom_ifraw
-    #         return None
-    #     else:
-    #         # Read dom eeprom at addr 0x51
-    #         return self._read_eeprom_devid(port_num, self.DOM_EEPROM_ADDR, 256)
+    def get_eeprom_dom_raw(self, port_num):
+        if port_num in self.qsfp_ports:
+            # QSFP DOM EEPROM is also at addr 0x50 and thus also stored in eeprom_ifraw
+            return None
+        else:
+            # Read dom eeprom as offset 0x100 on optoe eeprom
+            return self._read_eeprom_devid(port_num, self.DOM_EEPROM_ADDR, 256)
 
     def __init__(self):
         # Override port_to_eeprom_mapping for class initialization
