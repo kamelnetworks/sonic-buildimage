@@ -47,7 +47,7 @@ class SfpUtil(SfpUtilBase):
         if port_num in self.qsfp_ports:
             self._port_name = "QSFP" + str(port_num - self.QSFP_PORT_START + 1)
         else:
-            self._port_name = "SFP" + str(port_num)
+            self._port_name = "SFP" + str(port_num - self.QSFP_PORT_END)
         return self._port_name
 
     # def get_eeprom_dom_raw(self, port_num):
