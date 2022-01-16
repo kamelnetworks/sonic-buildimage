@@ -10,7 +10,7 @@ PY3_PACK=$DEVICE/$PLATFORM/sonic_platform-1.0-py3-none-any.whl
 install() {
     # Install python2.7 sonic-platform package
     if [ -e $PY2_PACK ]; then
-        pip install $PY2_PACK
+        pip2 install $PY2_PACK
     fi
 
     # Install python3 sonic-platform package
