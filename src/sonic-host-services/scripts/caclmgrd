@@ -62,6 +62,13 @@ class ControlPlaneAclManager(daemon_base.DaemonBase):
 
     BFD_SESSION_TABLE = "BFD_SESSION_TABLE"
 
+    MGMT_VRF_TABLE = "MGMT_VRF_CONFIG"
+    VRF_TABLE = "VRF"
+
+    BGP_NEIGHBOR = "BGP_NEIGHBOR"
+    BGP_PEER_GROUP = "BGP_PEER_GROUP"
+    BGP_PEER_RANGE = "BGP_PEER_RANGE"
+
     # To specify a port range instead of a single port, use iptables format:
     # separate start and end ports with a colon, e.g., "1000:2000"
     ACL_SERVICES = {
@@ -206,9 +213,10 @@ class ControlPlaneAclManager(daemon_base.DaemonBase):
         return tcp_flags_str
 
     def generate_block_ip2me_traffic_iptables_commands(self, namespace):
+        # We do not block MGMT_INTERFACE IPs by default to allow users
+        # to manage the box with default configuration.
         INTERFACE_TABLE_NAME_LIST = [
             "LOOPBACK_INTERFACE",
-            "MGMT_INTERFACE",
             "VLAN_INTERFACE",
             "PORTCHANNEL_INTERFACE",
             "INTERFACE"
@@ -223,18 +231,12 @@ class ControlPlaneAclManager(daemon_base.DaemonBase):
                 for key, _ in iface_table.items():
                     if not _ip_prefix_in_key(key):
                         continue
-
                     iface_name, iface_cidr = key
-                    ip_ntwrk = ipaddress.ip_network(iface_cidr, strict=False)
-
-                    # For VLAN interfaces, the IP address we want to block is the default gateway (i.e.,
-                    # the first available host IP address of the VLAN subnet)
-                    ip_addr = next(ip_ntwrk.hosts()) if iface_table_name == "VLAN_INTERFACE" else ip_ntwrk.network_address
-
-                    if isinstance(ip_ntwrk, ipaddress.IPv4Network):
-                        block_ip2me_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -d {}/{} -j DROP".format(ip_addr, ip_ntwrk.max_prefixlen))
-                    elif isinstance(ip_ntwrk, ipaddress.IPv6Network):
-                        block_ip2me_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -d {}/{} -j DROP".format(ip_addr, ip_ntwrk.max_prefixlen))
+                    ip_iface = ipaddress.ip_interface(iface_cidr)
+                    if isinstance(ip_iface, ipaddress.IPv4Interface):
+                        block_ip2me_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -d {} -j DROP -m comment --comment 'Block IP2ME on interface {}'".format(ip_iface.ip, iface_name))
+                    elif isinstance(ip_iface, ipaddress.IPv6Interface):
+                        block_ip2me_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -d {} -j DROP -m comment --comment 'Block IP2ME on interface {}'".format(ip_iface.ip, iface_name))
                     else:
                         self.log_warning("Unrecognized IP address type on interface '{}': {}".format(iface_name, ip_ntwrk))
 
@@ -464,8 +466,15 @@ class ControlPlaneAclManager(daemon_base.DaemonBase):
         iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -X")
 
         # Add iptables/ip6tables commands to allow all traffic from localhost
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -s 127.0.0.1 -i lo -j ACCEPT")
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -s ::1 -i lo -j ACCEPT")
+        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -s 127.0.0.1 -i lo -j ACCEPT -m comment --comment 'Allow internal traffic'")
+        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -s ::1 -i lo -j ACCEPT -m comment --comment 'Allow internal traffic'")
+        # When executed towards localhost inside VRFs the source interface is the master interface
+        if self.config_db_map[namespace].get_entry(self.MGMT_VRF_TABLE, "vrf_global").get("mgmtVrfEnabled", False):
+            iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -s 127.0.0.1 -i {} -j ACCEPT -m comment --comment 'Allow internal traffic'".format("mgmt"))
+            iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -s ::1 -i {} -j ACCEPT -m comment --comment 'Allow internal traffic'".format("mgmt"))
+        for vrf in self.config_db_map[namespace].get_table(self.VRF_TABLE).keys():
+            iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -s 127.0.0.1 -i {} -j ACCEPT -m comment --comment 'Allow internal traffic'".format(vrf))
+            iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -s ::1 -i {} -j ACCEPT -m comment --comment 'Allow internal traffic'".format(vrf))
 
         # Add iptables commands to allow internal docker traffic
         iptables_cmds += self.generate_allow_internal_docker_ip_traffic_commands(namespace)
@@ -477,43 +486,55 @@ class ControlPlaneAclManager(daemon_base.DaemonBase):
 
         # Add iptables/ip6tables commands to allow bidirectional ICMPv4 ping and traceroute
         # TODO: Support processing ICMPv4 service ACL rules, and remove this blanket acceptance
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -p icmp --icmp-type echo-request -j ACCEPT")
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -p icmp --icmp-type echo-reply -j ACCEPT")
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -p icmp --icmp-type destination-unreachable -j ACCEPT")
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -p icmp --icmp-type time-exceeded -j ACCEPT")
+        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -p icmp --icmp-type echo-request -j ACCEPT -m comment --comment 'Allow ICMP echo request'")
+        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -p icmp --icmp-type echo-reply -j ACCEPT -m comment --comment 'Allow ICMP echo reply'")
+        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -p icmp --icmp-type destination-unreachable -j ACCEPT -m comment --comment 'Allow ICMP destination unreachable'")
+        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -p icmp --icmp-type time-exceeded -j ACCEPT -m comment --comment 'Allow ICMP time exceeded'")
 
         # Add iptables/ip6tables commands to allow bidirectional ICMPv6 ping and traceroute
         # TODO: Support processing ICMPv6 service ACL rules, and remove this blanket acceptance
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p icmpv6 --icmpv6-type echo-request -j ACCEPT")
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p icmpv6 --icmpv6-type echo-reply -j ACCEPT")
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p icmpv6 --icmpv6-type destination-unreachable -j ACCEPT")
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p icmpv6 --icmpv6-type time-exceeded -j ACCEPT")
+        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p icmpv6 --icmpv6-type echo-request -j ACCEPT -m comment --comment 'Allow ICMPv6 echo request'")
+        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p icmpv6 --icmpv6-type echo-reply -j ACCEPT -m comment --comment 'Allow ICMPv6 echo reply'")
+        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p icmpv6 --icmpv6-type destination-unreachable -j ACCEPT -m comment --comment 'Allow ICMPv6 destination unreachable'")
+        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p icmpv6 --icmpv6-type time-exceeded -j ACCEPT -m comment --comment 'Allow ICMPv6 time exceeded'")
 
         # Add iptables/ip6tables commands to allow all incoming Neighbor Discovery Protocol (NDP) NS/NA/RS/RA messages
         # TODO: Support processing NDP service ACL rules, and remove this blanket acceptance
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p icmpv6 --icmpv6-type neighbor-solicitation -j ACCEPT")
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p icmpv6 --icmpv6-type neighbor-advertisement -j ACCEPT")
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p icmpv6 --icmpv6-type router-solicitation -j ACCEPT")
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p icmpv6 --icmpv6-type router-advertisement -j ACCEPT")
+        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p icmpv6 --icmpv6-type neighbor-solicitation -j ACCEPT -m comment --comment 'Allow ICMPv6 neighbor solicitation'")
+        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p icmpv6 --icmpv6-type neighbor-advertisement -j ACCEPT -m comment --comment 'Allow ICMPv6 neighbor advertisement'")
+        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p icmpv6 --icmpv6-type router-solicitation -j ACCEPT -m comment --comment 'Allow ICMPv6 router solicitation'")
+        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p icmpv6 --icmpv6-type router-advertisement -j ACCEPT -m comment --comment 'Allow ICMPv6 router advertisement'")
 
         # Add iptables commands to link the DCHP chain to block dhcp packets based on ingress interfaces
         if self.DualToR:
             iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -p udp --dport 67 -j DHCP")
 
-        # Add iptables/ip6tables commands to allow all incoming IPv4 DHCP packets
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -p udp --dport 67:68 -j ACCEPT")
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p udp --dport 67:68 -j ACCEPT")
+        # Add iptables commands to allow all incoming IPv4 DHCP packets
+        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -p udp --dport 67:68 -j ACCEPT -m comment --comment 'Allow DHCP'")
 
-        # Add iptables/ip6tables commands to allow all incoming IPv6 DHCP packets
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -p udp --dport 546:547 -j ACCEPT")
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p udp --dport 546:547 -j ACCEPT")
+        # Add ip6tables commands to allow all incoming IPv6 DHCP packets
+        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p udp --dport 546:547 -j ACCEPT -m comment --comment 'Allow DHCPv6'")
 
         # Add iptables/ip6tables commands to allow all incoming BGP traffic
-        # TODO: Determine BGP ACLs based on configured device sessions, and remove this blanket acceptance
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -p tcp --dport 179 -j ACCEPT")
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -p tcp --sport 179 -j ACCEPT")
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p tcp --dport 179 -j ACCEPT")
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p tcp --sport 179 -j ACCEPT")
+        for key, config in self.config_db_map[namespace].get_table(self.BGP_NEIGHBOR).items():
+            # Format can either be VRF|PeerIP or just PeerIP (older format)
+            # Treat it as a potential CIDR to allow for e.g. dynamic BGP neighbors
+            peer_cidr = key[-1] if isinstance(key, tuple) else key
+            local_ip = config['local_addr']
+            name = config.get('name', 'unnamed')
+            peer_network = ipaddress.ip_network(peer_cidr, strict=False)
+            local_address = ipaddress.ip_address(local_ip)
+            if isinstance(peer_network, ipaddress.IPv4Network) and isinstance(local_address, ipaddress.IPv4Address):
+                iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -s {} -d {} -p tcp --dport 179 -j ACCEPT -m comment --comment 'BGP peer: {}'".format(peer_cidr, local_ip, name))
+            elif isinstance(peer_network, ipaddress.IPv6Network) and isinstance(local_address, ipaddress.IPv6Address):
+                iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -s {} -d {} -p tcp --dport 179 -j ACCEPT -m comment --comment 'BGP peer: {}'".format(peer_cidr, local_ip, name))
+            else:
+                self.log_warning("Unrecognized or inconsistent IP address type on BGP neighbor '{}'".format(key))
+
+        # TODO: BGP_PEER_RANGE and BGP_PEER_GROUP is not implemented yet, so if they are defined allow BGP from everyone
+        if self.config_db_map[namespace].get_table(self.BGP_PEER_RANGE) or self.config_db_map[namespace].get_table(self.BGP_PEER_GROUP):
+            iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -p tcp --dport 179 -j ACCEPT -m comment --comment 'BGP peer group enabled")
+            iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p tcp --dport 179 -j ACCEPT -m comment --comment 'BGP peer group enabled")
 
         # Get current ACL tables and rules from Config DB
         self._tables_db_info = self.config_db_map[namespace].get_table(self.ACL_TABLE)
@@ -558,6 +579,7 @@ class ControlPlaneAclManager(daemon_base.DaemonBase):
                             continue
 
                         try:
+                            rule_props['ID'] = rule_id
                             acl_rules[rule_props["PRIORITY"]] = rule_props
                         except KeyError:
                             self.log_error("rule_props for rule_id {} does not have key 'PRIORITY'!".format(rule_id))
@@ -650,6 +672,7 @@ class ControlPlaneAclManager(daemon_base.DaemonBase):
 
                             # Append the packet action as the jump target
                             rule_cmd += " -j {}".format(rule_props["PACKET_ACTION"])
+                            rule_cmd += " -m comment --comment='ACL: {}|{}'".format(table_name, rule_props['ID'])
 
                             iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + rule_cmd)
                             num_ctrl_plane_acl_rules += 1
@@ -662,14 +685,14 @@ class ControlPlaneAclManager(daemon_base.DaemonBase):
 
         # Add iptables/ip6tables commands to allow all incoming packets with TTL of 0 or 1
         # This allows the device to respond to tools like tcptraceroute
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -m ttl --ttl-lt 2 -j ACCEPT")
-        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p tcp -m hl --hl-lt 2 -j ACCEPT")
+        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -m ttl --ttl-lt 2 -j ACCEPT -m comment --comment 'Allow tcptraceroute'")
+        iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -p tcp -m hl --hl-lt 2 -j ACCEPT -m comment --comment 'Allow tcptraceroute'")
 
         # Finally, if the device has control plane ACLs configured,
         # add iptables/ip6tables commands to drop all other incoming packets
         if num_ctrl_plane_acl_rules > 0:
-            iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -j DROP")
-            iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -j DROP")
+            iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "iptables -A INPUT -j DROP -m comment --comment 'Drop everything else'")
+            iptables_cmds.append(self.iptables_cmd_ns_prefix[namespace] + "ip6tables -A INPUT -j DROP -m comment --comment 'Drop everything else'")
 
         return iptables_cmds, service_to_source_ip_map
 
