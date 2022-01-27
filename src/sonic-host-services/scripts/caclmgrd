@@ -221,6 +221,7 @@ class ControlPlaneAclManager(daemon_base.DaemonBase):
             iface_table = self.config_db_map[namespace].get_table(iface_table_name)
             if iface_table:
                 for key, _ in iface_table.items():
+                    print(key)
                     if not _ip_prefix_in_key(key):
                         continue
                     iface_name, iface_cidr = key
