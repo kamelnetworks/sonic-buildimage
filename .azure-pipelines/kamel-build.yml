@@ -68,4 +68,7 @@ stages:
             raw_image: yes
             docker_syncd_rpc_image: yes
             platform_rpc: brcm
-
+        - name: mellanox
+          variables:
+            docker_syncd_rpc_image: yes
+            platform_rpc: mlnx
