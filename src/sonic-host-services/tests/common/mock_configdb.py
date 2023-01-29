@@ -28,10 +28,10 @@ class MockConfigDb(object):
         pass
 
     def get(self, db_id, key, field):
-        return MockConfigDb.CONFIG_DB[key][field]
+        return MockConfigDb.CONFIG_DB.get(key, {}).get(field, None)
 
     def get_entry(self, key, field):
-        return MockConfigDb.CONFIG_DB[key][field]
+        return MockConfigDb.CONFIG_DB.get(key, {}).get(field, {})
 
     def mod_entry(self, key, field, data):
         existing_data = self.get_entry(key, field)
@@ -43,7 +43,7 @@ class MockConfigDb(object):
 
     def get_table(self, table_name):
         data = {}
-        for k, v in MockConfigDb.CONFIG_DB[table_name].items():
+        for k, v in MockConfigDb.CONFIG_DB.get(table_name, {}).items():
             data[self.deserialize_key(k)] = v
         return data
 
