@@ -4,7 +4,7 @@
 	branch = 202211
 [submodule "sonic-linux-kernel"]
 	path = src/sonic-linux-kernel
-	url = https://github.com/sonic-net/sonic-linux-kernel
+	url = https://github.com/kamelnetworks/sonic-linux-kernel
 	branch = 202211
 [submodule "sonic-sairedis"]
 	path = src/sonic-sairedis
@@ -12,7 +12,7 @@
 	branch = 202211
 [submodule "sonic-swss"]
 	path = src/sonic-swss
-	url = https://github.com/sonic-net/sonic-swss
+	url = https://github.com/kamelnetworks/sonic-swss
 	branch = 202211
 [submodule "src/p4c-bm/p4c-bm"]
 	path = platform/p4/p4c-bm/p4c-bm
@@ -74,7 +74,7 @@
 	url = https://github.com/secdev/scapy.git
 [submodule "src/sonic-mgmt-framework"]
 	path = src/sonic-mgmt-framework
-	url = https://github.com/sonic-net/sonic-mgmt-framework
+	url = https://github.com/kamelnetworks/sonic-mgmt-framework
 [submodule "src/sonic-ztp"]
 	path = src/sonic-ztp
 	url = https://github.com/sonic-net/sonic-ztp
@@ -110,7 +110,8 @@
 	url = https://github.com/sonic-net/sonic-dhcp-relay.git
 [submodule "src/sonic-host-services"]
 	path = src/sonic-host-services
-	url = https://github.com/sonic-net/sonic-host-services
+	url = https://github.com/kamelnetworks/sonic-host-services
+	branch = 202211
 [submodule "src/sonic-gnmi"]
 	path = src/sonic-gnmi
 	url = https://github.com/sonic-net/sonic-gnmi.git
