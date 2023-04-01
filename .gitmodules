@@ -77,7 +77,7 @@
 	url = https://github.com/Mellanox/SAI-Implementation
 [submodule "src/sonic-mgmt-framework"]
 	path = src/sonic-mgmt-framework
-	url = https://github.com/sonic-net/sonic-mgmt-framework
+	url = https://github.com/kamelnetworks/sonic-mgmt-framework
 [submodule "src/sonic-ztp"]
 	path = src/sonic-ztp
 	url = https://github.com/sonic-net/sonic-ztp
