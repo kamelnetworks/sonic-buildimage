@@ -4,7 +4,7 @@
 	branch = 202211
 [submodule "sonic-linux-kernel"]
 	path = src/sonic-linux-kernel
-	url = https://github.com/sonic-net/sonic-linux-kernel
+	url = https://github.com/kamelnetworks/sonic-linux-kernel
 	branch = 202211
 [submodule "sonic-sairedis"]
 	path = src/sonic-sairedis
