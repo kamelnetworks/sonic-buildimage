@@ -1,0 +1,16 @@
+on:
+  push:
+
+name: Delete Draft Releases older than 1 day
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Delete drafts
+        uses: hugo19941994/delete-draft-releases@v1.0.1
+        with:
+          threshold: 6h
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

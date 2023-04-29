@@ -73,6 +73,32 @@ stages:
     parameters:
       buildOptions: 'USERNAME=admin SONIC_BUILD_JOBS=$(nproc) ${{ variables.VERSION_CONTROL_OPTIONS }}'
       preSteps:
+      - task: GitHubRelease@1
+        displayName: Prepare Github release
+        inputs:
+          gitHubConnection: github
+          repositoryName: kamelnetworks/sonic-buildimage
+          action: create
+          tagSource: userSpecifiedTag
+          tag: 'build-$(Build.BuildId)-$(GROUP_NAME)'
+          title: 'v$(Build.BuildId) - $(GROUP_NAME)'
+          isPreRelease: true
+          addChangeLog: false
+          releaseNotesSource: inline
+          releaseNotesInline: 'Build version `SONiC.$(Build.SourceBranchName)-kamel.$(Build.BuildId)-$(Build.SourceVersion)`'
+      - script: |
+          sleep 10
+        displayName: Wait for Github
+      - task: GitHubRelease@1
+        displayName: Mark release as Draft
+        inputs:
+          gitHubConnection: github
+          repositoryName: kamelnetworks/sonic-buildimage
+          action: edit
+          tagSource: userSpecifiedTag
+          tag: 'build-$(Build.BuildId)-$(GROUP_NAME)'
+          isDraft: true
+          addChangeLog: false
       - script: |
           # Install build dependencies
           sudo apt-get update
@@ -92,6 +118,19 @@ stages:
           docker tag "${image_tag}" "quay.io/kamelnetworks/${image_tag}"
           docker push "quay.io/kamelnetworks/${image_tag}"|| true
         displayName: 'Upload slave container to quay.io'
+      - task: GitHubRelease@1
+        displayName: Update Github release with artifacts
+        inputs:
+          gitHubConnection: github
+          repositoryName: kamelnetworks/sonic-buildimage
+          action: edit
+          tagSource: userSpecifiedTag
+          tag: 'build-$(Build.BuildId)-$(GROUP_NAME)'
+          assets: |
+            $(System.DefaultWorkingDirectory)/target/sonic-broadcom.*
+            $(System.DefaultWorkingDirectory)/target/sonic-aboot-broadcom.*
+            $(System.DefaultWorkingDirectory)/target/sonic-mellanox.*
+          addChangeLog: false
       jobGroups:
         - name: broadcom
           variables:
