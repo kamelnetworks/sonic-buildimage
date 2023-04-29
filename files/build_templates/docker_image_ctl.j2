@@ -626,6 +626,7 @@ wait() {
     {%- else %}
     /usr/local/bin/container wait $DOCKERNAME
     {%- endif %}
+    echo "Container wait completed, rc='$?'"
 }
 
 stop() {
