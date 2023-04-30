@@ -40,8 +40,8 @@ RUN pre_run_buildinfo '${IMAGENAME}'
 
 # Add the auto-generate code if it is not added in the target Dockerfile
 if [ ! -f $DOCKERFILE_TARGE ] || ! grep -q "Auto-Generated for buildinfo" $DOCKERFILE_TARGE; then
-    # Insert the docker build script before the RUN command
-    LINE_NUMBER=$(grep -Fn -m 1 'RUN' $DOCKERFILE | cut -d: -f1)
+    # Insert the docker build script before the INSERT_BUILDINFO_HERE marker
+    LINE_NUMBER=$(grep -Fn -m 1 'INSERT_BUILDINFO_HERE' $DOCKERFILE | cut -d: -f1)
     TEMP_FILE=$(mktemp)
     awk -v text="${DOCKERFILE_PRE_SCRIPT}" -v linenumber=$LINE_NUMBER 'NR==linenumber{print text}1' $DOCKERFILE > $TEMP_FILE
 
