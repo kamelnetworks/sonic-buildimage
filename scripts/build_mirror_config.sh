@@ -5,7 +5,7 @@ CONFIG_PATH=$1
 export ARCHITECTURE=$2
 export DISTRIBUTION=$3
 
-DEFAULT_MIRROR_URL_PREFIX=http://packages.trafficmanager.net
+DEFAULT_MIRROR_URL_PREFIX=http://deb.debian.org/
 MIRROR_VERSION_FILE=
 [[ "$SONIC_VERSION_CONTROL_COMPONENTS" == *deb* || $SONIC_VERSION_CONTROL_COMPONENTS == *all* ]] && MIRROR_VERSION_FILE=files/build/versions/default/versions-mirror
 [ -f target/versions/default/versions-mirror ] && MIRROR_VERSION_FILE=target/versions/default/versions-mirror
