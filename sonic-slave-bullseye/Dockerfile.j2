@@ -82,6 +82,10 @@ RUN PATH=/python_virtualenv/env3/bin/:$PATH python3 -m pip uninstall -y enum34
 RUN PATH=/python_virtualenv/env3/bin/:$PATH pip3 install --force-reinstall --no-cache-dir coverage
 {%- endif %}
 
+RUN apt-get update; apt-get install -y libc6 libssl1.1 libssl-dev
+
+# INSERT_BUILDINFO_HERE
+
 RUN apt-get update && apt-get install -y \
         apt-utils \
         default-jre-headless \

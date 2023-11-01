@@ -32,6 +32,10 @@ COPY ["no_install_recommend_suggest", "/etc/apt/apt.conf.d"]
 COPY ["no-check-valid-until", "/etc/apt/apt.conf.d"]
 COPY ["apt-multiple-retries", "/etc/apt/apt.conf.d"]
 
+RUN apt-get update; apt-get install -y libc6 libssl1.1 libssl-dev
+
+# INSERT_BUILDINFO_HERE
+
 # Update apt cache and
 # pre-install fundamental packages
 RUN apt-get update &&        \

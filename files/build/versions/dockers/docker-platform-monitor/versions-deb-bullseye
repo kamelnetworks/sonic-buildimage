@@ -27,8 +27,8 @@ libasan6==10.2.1-6
 libbabeltrace1==1.5.8-1+b3
 libbinutils==2.35.2-2
 libboost-regex1.74.0==1.74.0-9
-libc-dev-bin==2.31-13+deb11u6
-libc6-dev==2.31-13+deb11u6
+libc-dev-bin==2.31-13+deb11u7
+libc6-dev==2.31-13+deb11u7
 libcairo2==1.16.0-5
 libcbor0==0.5.0+dfsg-2
 libcc1-0==10.2.1-6
