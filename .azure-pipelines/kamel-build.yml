@@ -68,6 +68,8 @@ stages:
     value: quay.io
   - name: ENABLE_DOCKER_BASE_PULL
     value: y
+  - name: ENABLE_FIPS_FEATURE  # Disable custom FIPS packages, use conventional ones
+    value: n
   jobs:
   - template: azure-pipelines-build.yml
     parameters:
