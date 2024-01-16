@@ -1,0 +1,12 @@
+for i in $(seq 1 5); do
+    ret=$(depmod -a)
+    if [ -n "$ret" ]; then
+        break
+    fi
+    sleep 2
+    echo "run depmod again"
+done
+systemctl enable platform-modules-silverstone-x.service
+systemctl start platform-modules-silverstone-x.service
+
+/usr/local/bin/platform_api_mgnt.sh install
