@@ -85,6 +85,8 @@ stages:
           variables:
             platform_rpc: mlnx
         - name: innovium
+          variables:
+            platform_rpc: invm
 
 - stage: UpgradeVersions
   jobs:
