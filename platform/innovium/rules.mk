@@ -9,6 +9,8 @@ include $(PLATFORM_PATH)/one-image.mk
 include $(PLATFORM_PATH)/libsaithrift-dev.mk
 include $(PLATFORM_PATH)/python-saithrift.mk
 
+INVM_CONFLICT_DEB = innovium-sai-headers
+
 SONIC_ALL += $(SONIC_INVM_ONE_IMAGE) \
              $(DOCKER_FPM) \
              $(DOCKER_PTF_INVM) \
@@ -16,7 +18,7 @@ SONIC_ALL += $(SONIC_INVM_ONE_IMAGE) \
 
 # Inject invm sai into syncd
 $(SYNCD)_DEPENDS += $(INVM_HSAI) $(INVM_LIBSAI) $(LIBSAITHRIFT_DEV_INVM)
-$(SYNCD)_UNINSTALLS += $(INVM_HSAI)
+$(SYNCD)_UNINSTALLS += $(INVM_CONFLICT_DEB)
 
 # Runtime dependency on invm sai is set only for syncd
 $(SYNCD)_RDEPENDS += $(INVM_HSAI)
