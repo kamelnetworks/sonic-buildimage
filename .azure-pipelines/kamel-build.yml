@@ -111,6 +111,7 @@ stages:
             $(Build.ArtifactStagingDirectory)/target/sonic-broadcom.*
             $(Build.ArtifactStagingDirectory)/target/sonic-aboot-broadcom.*
             $(Build.ArtifactStagingDirectory)/target/sonic-mellanox.*
+            $(Build.ArtifactStagingDirectory)/target/sonic-innovium.*
       jobGroups:
         - name: broadcom
           variables:
@@ -119,3 +120,4 @@ stages:
         - name: mellanox
           variables:
             platform_rpc: mlnx
+        - name: innovium

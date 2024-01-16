@@ -84,6 +84,7 @@ stages:
         - name: mellanox
           variables:
             platform_rpc: mlnx
+        - name: innovium
 
 - stage: UpgradeVersions
   jobs:
