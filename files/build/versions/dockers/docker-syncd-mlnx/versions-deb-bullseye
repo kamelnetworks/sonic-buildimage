@@ -105,7 +105,7 @@ libxtables12==1.8.7-1
 libyang==1.0.73
 libyang-cpp==1.0.73
 libzmq5==4.3.4-1
-linux-libc-dev==5.10.197-1
+linux-libc-dev==5.10.205-2
 lua-bitop==1.0.2-5
 lua-cjson==2.1.0+dfsg-2.1
 media-types==4.0.0

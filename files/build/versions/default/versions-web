@@ -1,2 +1,2 @@
 https://download.docker.com/linux/debian/gpg==1afae06b34a13c1b3d9cb61a26285a15
-https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64==0334fd679ec178f14882b73ebc10d7d8
+https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64==44124b7ea28b7ffc38cb7a6b770b7844
