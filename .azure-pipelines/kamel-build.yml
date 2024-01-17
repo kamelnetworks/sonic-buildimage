@@ -123,3 +123,35 @@ stages:
         - name: innovium
           variables:
             platform_rpc: invm
+
+- stage: MakeRelease
+  pool: sonicbld
+  jobs:
+  - job: MakeRelease
+    steps:
+    - checkout: self
+      displayName: 'Checkout code'
+    - download: current
+      patterns: |
+        */target/sonic-broadcom.*
+        */target/sonic-aboot-broadcom.*
+        */target/sonic-mellanox.*
+        */target/sonic-innovium.*
+    - task: GitHubRelease@1
+      displayName: Make Github release with artifacts
+      inputs:
+        gitHubConnection: github
+        repositoryName: kamelnetworks/sonic-buildimage
+        action: create
+        tagSource: userSpecifiedTag
+        tag: 'build-$(Build.BuildId)'
+        title: 'v$(Build.BuildId)'
+        isPreRelease: true
+        addChangeLog: false
+        releaseNotesSource: inline
+        releaseNotesInline: 'Build version `SONiC.$(Build.SourceBranchName)-kamel.$(Build.BuildId)-$(Build.SourceVersion)`'
+        assets: |
+          $(Pipeline.Workspace)/sonic-buildimage.broadcom/target/sonic-broadcom.*
+          $(Pipeline.Workspace)/sonic-buildimage.broadcom/target/sonic-aboot-broadcom.*
+          $(Pipeline.Workspace)/sonic-buildimage.mellanox/target/sonic-mellanox.*
+          $(Pipeline.Workspace)/sonic-buildimage.innovium/target/sonic-innovium.*
