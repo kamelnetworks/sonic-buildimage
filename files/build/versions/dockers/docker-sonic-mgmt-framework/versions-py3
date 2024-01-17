@@ -12,7 +12,7 @@ idna==3.6
 importlib-metadata==7.0.1
 inflection==0.5.1
 itsdangerous==2.1.2
-jsonschema==4.20.0
+jsonschema==4.21.0
 jsonschema-path==0.3.2
 jsonschema-specifications==2023.12.1
 lazy-object-proxy==1.10.0
@@ -24,7 +24,7 @@ python-dateutil==2.6.0
 referencing==0.31.1
 requests==2.31.0
 rfc3339-validator==0.1.4
-rpds-py==0.16.2
+rpds-py==0.17.1
 six==1.11.0
 urllib3==1.26.5
 werkzeug==3.0.1
