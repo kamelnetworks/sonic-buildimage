@@ -88,30 +88,6 @@ stages:
           sudo apt-get install -y docker-ce docker-ce-cli containerd.io
           sudo chmod 666 /var/run/docker.sock
         displayName: 'Install dependencies'
-      postSteps:
-      - script: |
-          image_tag="$(SONIC_VERSION_CONTROL_COMPONENTS=all make showtag | awk '/sonic-slave-bullseye:/')"
-          docker tag "${image_tag}" "quay.io/kamelnetworks/${image_tag}"
-          docker push "quay.io/kamelnetworks/${image_tag}"|| true
-        displayName: 'Upload build container to quay.io'
-      - task: GitHubRelease@1
-        displayName: Make Github release with artifacts
-        inputs:
-          gitHubConnection: github
-          repositoryName: kamelnetworks/sonic-buildimage
-          action: create
-          tagSource: userSpecifiedTag
-          tag: 'build-$(Build.BuildId)-$(GROUP_NAME)'
-          title: 'v$(Build.BuildId) - $(GROUP_NAME)'
-          isPreRelease: true
-          addChangeLog: false
-          releaseNotesSource: inline
-          releaseNotesInline: 'Build version `SONiC.$(Build.SourceBranchName)-kamel.$(Build.BuildId)-$(Build.SourceVersion)`'
-          assets: |
-            $(Build.ArtifactStagingDirectory)/target/sonic-broadcom.*
-            $(Build.ArtifactStagingDirectory)/target/sonic-aboot-broadcom.*
-            $(Build.ArtifactStagingDirectory)/target/sonic-mellanox.*
-            $(Build.ArtifactStagingDirectory)/target/sonic-innovium.*
       jobGroups:
         - name: broadcom
           variables:
@@ -123,3 +99,35 @@ stages:
         - name: innovium
           variables:
             platform_rpc: invm
+
+- stage: MakeRelease
+  pool: sonicbld
+  jobs:
+  - job: MakeRelease
+    steps:
+    - checkout: self
+      displayName: 'Checkout code'
+    - download: current
+      patterns: |
+        **/target/sonic-broadcom.*
+        **/target/sonic-aboot-broadcom.*
+        **/target/sonic-mellanox.*
+        **/target/sonic-innovium.*
+    - task: GitHubRelease@1
+      displayName: Make Github release with artifacts
+      inputs:
+        gitHubConnection: github
+        repositoryName: kamelnetworks/sonic-buildimage
+        action: create
+        tagSource: userSpecifiedTag
+        tag: 'build-$(Build.BuildId)'
+        title: 'v$(Build.BuildId)'
+        isPreRelease: true
+        addChangeLog: false
+        releaseNotesSource: inline
+        releaseNotesInline: 'Build version `SONiC.$(Build.SourceBranchName)-kamel.$(Build.BuildId)-$(Build.SourceVersion)`'
+        assets: |
+          $(Pipeline.Workspace)/**/target/sonic-broadcom.*
+          $(Pipeline.Workspace)/**/target/sonic-aboot-broadcom.*
+          $(Pipeline.Workspace)/**/target/sonic-mellanox.*
+          $(Pipeline.Workspace)/**/target/sonic-innovium.*
