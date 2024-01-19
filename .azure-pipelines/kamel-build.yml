@@ -120,8 +120,8 @@ stages:
         repositoryName: kamelnetworks/sonic-buildimage
         action: create
         tagSource: userSpecifiedTag
-        tag: 'build-$(Build.BuildId)'
-        title: 'v$(Build.BuildId)'
+        tag: 'build-$(Build.SourceBranchName)-$(Build.BuildId)'
+        title: '$(Build.SourceBranchName)-v$(Build.BuildId)'
         isPreRelease: true
         addChangeLog: true
         changeLogCompareToRelease: lastNonDraftRelease
