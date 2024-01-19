@@ -74,20 +74,6 @@ stages:
   - template: azure-pipelines-build.yml
     parameters:
       buildOptions: 'USERNAME=admin SONIC_BUILD_JOBS=$(nproc) ${{ variables.VERSION_CONTROL_OPTIONS }}'
-      preSteps:
-      - script: |
-          # Install build dependencies
-          sudo apt-get update
-          sudo apt-get install -y python3-pip ca-certificates curl gnupg lsb-release make
-          sudo pip3 install j2cli
-          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-          echo \
-            "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
-             $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-          sudo apt-get update
-          sudo apt-get install -y docker-ce docker-ce-cli containerd.io
-          sudo chmod 666 /var/run/docker.sock
-        displayName: 'Install dependencies'
       jobGroups:
         - name: broadcom
           variables:
