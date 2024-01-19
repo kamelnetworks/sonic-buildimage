@@ -123,7 +123,8 @@ stages:
         tag: 'build-$(Build.BuildId)'
         title: 'v$(Build.BuildId)'
         isPreRelease: true
-        addChangeLog: false
+        addChangeLog: true
+        changeLogCompareToRelease: lastNonDraftRelease
         releaseNotesSource: inline
         releaseNotesInline: 'Build version `SONiC.$(Build.SourceBranchName)-kamel.$(Build.BuildId)-$(Build.SourceVersion)`'
         assets: |
