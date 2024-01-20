@@ -1,0 +1,40 @@
+FROM cruizba/ubuntu-dind:focal-24.0.7
+
+ARG AGENT_VERSION=3.232.3
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN useradd -s /bin/bash -m ubuntu
+RUN echo "APT::Get::Assume-Yes \"true\";" > /etc/apt/apt.conf.d/90assumeyes
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    jq \
+    git \
+    iputils-ping \
+    netcat \
+    openssh-client \
+    wget \
+    nftables \
+    python3-pip \
+    gnupg \
+    lsb-release \
+    make \
+    sudo \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --system docker
+RUN gpasswd -a ubuntu sudo
+RUN gpasswd -a ubuntu docker
+RUN echo '%sudo   ALL=(ALL:ALL) NOPASSWD: ALL' >> /etc/sudoers
+RUN update-alternatives --set iptables /usr/sbin/iptables-nft
+RUN pip3 install j2cli
+
+WORKDIR /azp
+RUN chown ubuntu:ubuntu /azp
+RUN AZP_AGENTPACKAGE_URL=https://vstsagentpackage.azureedge.net/agent/${AGENT_VERSION}/vsts-agent-linux-x64-${AGENT_VERSION}.tar.gz; curl -LsS "$AZP_AGENTPACKAGE_URL" | sudo -u ubuntu tar -xz
+RUN /azp/bin/installdependencies.sh && rm -rf /var/lib/apt/lists/*
+
+COPY kamel-docker-start.sh /start.sh
+RUN chmod +x /start.sh
+
+CMD sudo --preserve-env=AZP_URL,AZP_TOKEN,AZP_AGENT_NAME,AZP_POOL -u ubuntu -D /azp /start.sh
