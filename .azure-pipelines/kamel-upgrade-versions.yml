@@ -58,6 +58,8 @@ stages:
       value: n
     - name: QUIET
       value: n
+    - name: BUILD_LOG_TIMESTAMP
+      value: simple
   jobs:
   - template: azure-pipelines-build.yml
     parameters:
