@@ -91,12 +91,15 @@ stages:
           variables:
             swi_image: yes
             platform_rpc: brcm
+            dbg_image: yes
         - name: mellanox
           variables:
             platform_rpc: mlnx
+            dbg_image: yes
         - name: innovium
           variables:
             platform_rpc: invm
+            dbg_image: yes
 
 - stage: MakeRelease
   pool: sonicbld
@@ -107,10 +110,10 @@ stages:
       displayName: 'Checkout code'
     - download: current
       patterns: |
-        **/target/sonic-broadcom.*
-        **/target/sonic-aboot-broadcom.*
-        **/target/sonic-mellanox.*
-        **/target/sonic-innovium.*
+        **/target/sonic-broadcom*
+        **/target/sonic-aboot-broadcom*
+        **/target/sonic-mellanox*
+        **/target/sonic-innovium*
     - task: GitHubRelease@1
       displayName: Make Github release with artifacts
       inputs:
@@ -126,7 +129,7 @@ stages:
         releaseNotesSource: inline
         releaseNotesInline: 'Build version `SONiC.$(Build.SourceBranchName)-kamel.$(Build.BuildId)-$(Build.SourceVersion)`'
         assets: |
-          $(Pipeline.Workspace)/**/target/sonic-broadcom.*
-          $(Pipeline.Workspace)/**/target/sonic-aboot-broadcom.*
-          $(Pipeline.Workspace)/**/target/sonic-mellanox.*
-          $(Pipeline.Workspace)/**/target/sonic-innovium.*
+          $(Pipeline.Workspace)/**/target/sonic-broadcom*
+          $(Pipeline.Workspace)/**/target/sonic-aboot-broadcom*
+          $(Pipeline.Workspace)/**/target/sonic-mellanox*
+          $(Pipeline.Workspace)/**/target/sonic-innovium*
