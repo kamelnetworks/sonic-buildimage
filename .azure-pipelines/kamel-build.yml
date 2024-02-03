@@ -110,10 +110,18 @@ stages:
       displayName: 'Checkout code'
     - download: current
       patterns: |
-        **/target/sonic-broadcom*
-        **/target/sonic-aboot-broadcom*
-        **/target/sonic-mellanox*
-        **/target/sonic-innovium*
+        **/target/docker-*-dbg.gz
+        **/target/sonic-broadcom.*
+        **/target/sonic-aboot-broadcom.*
+        **/target/sonic-mellanox.*
+        **/target/sonic-innovium.*
+    - script: |
+        cd $(Pipeline.Workspace)/
+        # Example:
+        # mv sonic-buildimage.innovium/target/docker-macsec-dbg.gz docker-innovium-macsec-dbg.tar.gz
+        find sonic-buildimage.*/ -name \*-dbg.gz -type f \
+          -exec sh -c "new=\$(echo '{}' | sed -E 's/sonic-buildimage\.([^\\/]+)\\/target\\/docker-([^.]+)\.gz/docker-\1-\2.tar.gz/gm;t'); mv {} \$new" \;
+      displayName: 'Flatten debug image filenames'
     - task: GitHubRelease@1
       displayName: Make Github release with artifacts
       inputs:
@@ -129,7 +137,9 @@ stages:
         releaseNotesSource: inline
         releaseNotesInline: 'Build version `SONiC.$(Build.SourceBranchName)-kamel.$(Build.BuildId)-$(Build.SourceVersion)`'
         assets: |
-          $(Pipeline.Workspace)/**/target/sonic-broadcom*
-          $(Pipeline.Workspace)/**/target/sonic-aboot-broadcom*
-          $(Pipeline.Workspace)/**/target/sonic-mellanox*
-          $(Pipeline.Workspace)/**/target/sonic-innovium*
+          $(Pipeline.Workspace)/**/target/sonic-broadcom.*
+          $(Pipeline.Workspace)/**/target/sonic-aboot-broadcom.*
+          $(Pipeline.Workspace)/**/target/sonic-mellanox.*
+          $(Pipeline.Workspace)/**/target/sonic-innovium.*
+          $(Pipeline.Workspace)/docker-*-dbg.tar.gz
+
