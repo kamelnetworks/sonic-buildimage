@@ -1,4 +1,4 @@
-help_cli_enable=1
+sai_load_hw_config=/etc/bcm/flex/bcm56870_a0_premium_issu/b870.6.4.1/
 ifp_inports_support_enable=1
 ipv6_lpm_128b_enable=0x1
 l2_mem_entries=32768
@@ -17,13 +17,15 @@ module_64ports=1
 oversubscribe_mode=1
 parity_enable=1
 serdes_lane_config_dfe=on
-#serdes_fec_enable=1
 serdes_if_type_xe=13
 serdes_if_type_ce=14
-pbmp_gport_stack.0=0x0000000000000000000000000000000000000000000000000000000000000000
-#pbmp_xport_xe=0x48878787f8787808dfe1e0203e1e1e022
-pbmp_xport_xe=0x8808787f87808088221e1e1fe1e1e1fe
+pbmp_xport_xe=0xffffffffffffffffffffffffffffffffe
 
+reglist_enable=1
+scache_filename=/tmp/scache
+schan_intr_enable=0
+stable_size=0x5500000
+tdma_timeout_usec=3000000
 
 portmap_1.0=1:100
 portmap_5.0=5:100
@@ -349,9 +351,3 @@ dport_map_port_1=53
 dport_map_port_33=54
 dport_map_port_5=55
 dport_map_port_41=56
-
-reglist_enable=1
-scache_filename=/tmp/scache
-schan_intr_enable=0
-stable_size=0x5500000
-tdma_timeout_usec=3000000
