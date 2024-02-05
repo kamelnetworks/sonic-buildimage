@@ -24,7 +24,6 @@ class Common:
 
     SET_METHOD_IPMI = 'ipmitool'
     NULL_VAL = 'N/A'
-    HOST_CHK_CMD = "docker > /dev/null 2>&1"
     REF_KEY = '$ref:'
 
     def __init__(self, conf=None):
@@ -166,7 +165,7 @@ class Common:
         return True
 
     def is_host(self):
-        return os.system(self.HOST_CHK_CMD) == 0
+        return not os.path.isfile('/.dockerenv')
 
     def load_json_file(self, path):
         """
