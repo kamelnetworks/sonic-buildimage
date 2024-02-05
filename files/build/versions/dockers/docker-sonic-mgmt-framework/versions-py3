@@ -5,14 +5,14 @@ charset-normalizer==3.3.2
 click==8.1.7
 clickclick==20.10.2
 connexion==2.7.0
-flask==3.0.0
-grpcio==1.60.0
+flask==3.0.1
+grpcio==1.60.1
 grpcio-tools==1.20.0
 idna==3.6
 importlib-metadata==7.0.1
 inflection==0.5.1
 itsdangerous==2.1.2
-jsonschema==4.21.0
+jsonschema==4.21.1
 jsonschema-path==0.3.2
 jsonschema-specifications==2023.12.1
 lazy-object-proxy==1.10.0

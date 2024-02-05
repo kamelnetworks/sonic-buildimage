@@ -1,2 +1,2 @@
-amd64:amd64/debian:bullseye==sha256:4cb3f4198e4af2d03dffe6bfa4f3686773596494ef298f3882553d52e885634b
-amd64:debian:bullseye==sha256:71cb300d5448af821aedfe63afd55ba05f45a6a79f00dcd131b96b780bb99fe4
+amd64:amd64/debian:bullseye==sha256:a632fbbd1aaac7d2779423a77d6737e8404dda99d0ea527e9f8badbc7e23a2ca
+amd64:debian:bullseye==sha256:44cfd77e3dbebfa8a0545d9fd1bee6e874cf6998a3bbfb5cccf34919df4e3360
