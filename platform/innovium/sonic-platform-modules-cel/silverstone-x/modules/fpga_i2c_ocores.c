@@ -1260,7 +1260,7 @@ static int ocores_poll_wait(struct xiic_i2c *i2c)
 	}
 	
 	if (err)
-		dev_warn(i2c->adap.dev.parent,
+		dev_dbg(i2c->adap.dev.parent,
 			 "%s: STATUS timeout, bit 0x%x did not clear in 30ms\n",
 			 __func__, mask);
 	return err;

@@ -63,6 +63,7 @@ PSU2_VOUT_SS_ID = "0x37"
 PSU2_COUT_SS_ID = "0x38"
 PSU2_POUT_SS_ID = "0x39"
 PSU2_STATUS_REG = "0x3b"
+# TODO: Implement temperature reading
 PSU2_TMP1_REG = "0x35"
 PSU2_TMP2_REG = "0x36"
 PSU2_TMP3_REG = "0x6b"
@@ -121,6 +122,7 @@ class Psu(PsuBase):
         retval = self._api_helper.read_txt_file(gpio_file)
         return retval.rstrip('\r\n')
 
+    # TODO: Implement PSU voltage range
     def get_voltage(self):
         """
         Retrieves current PSU voltage output
@@ -198,9 +200,7 @@ class Psu(PsuBase):
         }.get(color)
         status, set_led = self._api_helper.ipmi_raw(
             IPMI_OEM_NETFN, IPMI_SET_PSU_LED_CMD.format(led_cmd))
-        set_status_led = False if not status else True
-
-        return set_status_led
+        return bool(status)
 
     def get_status_led(self):
         """
@@ -237,7 +237,7 @@ class Psu(PsuBase):
         return out
 
     def find_value(self, in_string):
-        result = re.search(b"^.+ ([0-9a-f]{2}) .+$", in_string)
+        result = re.search(r"^.+ ([0-9a-f]{2}) .+$", in_string)
         if result:
             return result.group(1)
         else:
@@ -254,17 +254,12 @@ class Psu(PsuBase):
 
         psu_id = self.psu1_id if self.index == 1 else self.psu2_id
         res_string = self.run_command(self.ipmi_raw + ' ' + psu_id)
-        status_byte = self.find_value(res_string)
+        status_byte = self.find_value(res_string.decode())
 
         if status_byte is None:
             return False
 
-        presence = ( int(status_byte, 16) >> 0 ) & 1
-        if presence:
-            return True
-        else:
-            return False
-
+        return (((int(status_byte, 16) >> 0 ) & 1) != 0)
 
     def get_status(self):
         """
@@ -277,17 +272,14 @@ class Psu(PsuBase):
 
         psu_id = self.psu1_id if self.index == 0 else self.psu2_id
         res_string = self.run_command(self.ipmi_raw + ' ' + psu_id)
-        status_byte = self.find_value(res_string)
+        status_byte = self.find_value(res_string.decode())
 
         if status_byte is None:
             return False
 
-        failure_detected = (int(status_byte, 16) >> 1) & 1
-        input_lost = (int(status_byte, 16) >> 3) & 1
-        if failure_detected or input_lost:
-            return False
-        else:
-            return True
+        failure_detected = (((int(status_byte, 16) >> 1) & 1) != 0)
+        input_lost = (((int(status_byte, 16) >> 3) & 1) != 0)
+        return not (failure_detected or input_lost)
 
     def get_model(self):
         """
@@ -307,7 +299,7 @@ class Psu(PsuBase):
         status, raw_model = self._api_helper.ipmi_fru_id(
             ipmi_fru_idx, IPMI_FRU_MODEL_KEY)
 
-        fru_pn_list = raw_model.split()
+        fru_pn_list = raw_model.decode().split()
         if len(fru_pn_list) > 3:
             model = fru_pn_list[3]
 
@@ -324,7 +316,7 @@ class Psu(PsuBase):
         status, raw_model = self._api_helper.ipmi_fru_id(
             ipmi_fru_idx, IPMI_FRU_SERIAL_KEY)
 
-        fru_sr_list = raw_model.split()
+        fru_sr_list = raw_model.decode().split()
         if len(fru_sr_list) > 3:
             serial = fru_sr_list[3]
 
