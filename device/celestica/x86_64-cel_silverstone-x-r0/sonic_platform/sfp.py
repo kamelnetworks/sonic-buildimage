@@ -197,7 +197,7 @@ class Sfp(SfpBase):
             port_eeprom_path = eeprom_path.format(self.port_to_i2c_mapping[x])
             self.port_to_eeprom_mapping[x] = port_eeprom_path
 
-        self.info_dict_keys = ['type', 'hardware_rev', 'serial', 'manufacturer', 'model', 'connector', 'encoding', 'ext_identifier',
+        self.info_dict_keys = ['type', 'vendor_rev', 'serial', 'manufacturer', 'model', 'connector', 'encoding', 'ext_identifier',
                                'ext_rateselect_compliance', 'cable_type', 'cable_length', 'nominal_bit_rate', 'specification_compliance', 'vendor_date', 'vendor_oui']
 
         self.dom_dict_keys = ['rx_los', 'tx_fault', 'reset_status', 'power_lpmode', 'tx_disable', 'tx_disable_channel', 'temperature', 'voltage',
@@ -250,7 +250,7 @@ class Sfp(SfpBase):
         sysfsfile_eeprom = None
         eeprom_raw = []
         for i in range(0, num_bytes):
-            eeprom_raw.append("0x00")
+            eeprom_raw.append("00")
 
         sysfs_sfp_i2c_client_eeprom_path = self.port_to_eeprom_mapping[self.port_num]
         try:
@@ -259,7 +259,7 @@ class Sfp(SfpBase):
             sysfsfile_eeprom.seek(offset)
             raw = sysfsfile_eeprom.read(num_bytes)
             for n in range(0, num_bytes):
-                eeprom_raw[n] = hex(raw[n])[2:].zfill(2)
+                eeprom_raw[n] = raw[n:n+1].hex()
         except Exception as e:
             pass
         finally:
@@ -296,7 +296,7 @@ class Sfp(SfpBase):
                     QSFP_VERSION_COMPLIANCE_OFFSET, QSFP_VERSION_COMPLIANCE_WIDTH)
                 qsfp_version_compliance = int(
                     qsfp_version_compliance_raw[0], 16)
-                dom_capability = sfpi_obj.parse_qsfp_dom_capability(
+                dom_capability = sfpi_obj.parse_dom_capability(
                     qsfp_dom_capability_raw, 0)
                 if qsfp_version_compliance >= 0x08:
                     self.dom_temp_supported = dom_capability['data']['Temp_support']['value'] == 'On'
@@ -377,7 +377,7 @@ class Sfp(SfpBase):
         keys                       |Value Format   |Information
         ---------------------------|---------------|----------------------------
         type                       |1*255VCHAR     |type of SFP
-        hardware_rev               |1*255VCHAR     |hardware version of SFP
+        vendor_rev                 |1*255VCHAR     |hardware version of SFP
         serial                     |1*255VCHAR     |serial number of the SFP
         manufacturer               |1*255VCHAR     |SFP vendor name
         model                      |1*255VCHAR     |SFP model name
@@ -451,7 +451,7 @@ class Sfp(SfpBase):
             transceiver_info_dict['type'] = sfp_type_data['data']['type']['value']
             transceiver_info_dict['manufacturer'] = sfp_vendor_name_data['data']['Vendor Name']['value']
             transceiver_info_dict['model'] = sfp_vendor_pn_data['data']['Vendor PN']['value']
-            transceiver_info_dict['hardware_rev'] = sfp_vendor_rev_data['data']['Vendor Rev']['value']
+            transceiver_info_dict['vendor_rev'] = sfp_vendor_rev_data['data']['Vendor Rev']['value']
             transceiver_info_dict['serial'] = sfp_vendor_sn_data['data']['Vendor SN']['value']
             transceiver_info_dict['vendor_oui'] = 'N/A'
             transceiver_info_dict['vendor_date'] = 'N/A'
@@ -529,7 +529,7 @@ class Sfp(SfpBase):
             transceiver_info_dict['type'] = sfp_interface_bulk_data['data']['type']['value']
             transceiver_info_dict['manufacturename'] = sfp_vendor_name_data['data']['Vendor Name']['value']
             transceiver_info_dict['modelname'] = sfp_vendor_pn_data['data']['Vendor PN']['value']
-            transceiver_info_dict['hardwarerev'] = sfp_vendor_rev_data['data']['Vendor Rev']['value']
+            transceiver_info_dict['vendor_rev'] = sfp_vendor_rev_data['data']['Vendor Rev']['value']
             transceiver_info_dict['serialnum'] = sfp_vendor_sn_data['data']['Vendor SN']['value']
             transceiver_info_dict['vendor_oui'] = sfp_vendor_oui_data['data']['Vendor OUI']['value']
             transceiver_info_dict['vendor_date'] = sfp_vendor_date_data[
