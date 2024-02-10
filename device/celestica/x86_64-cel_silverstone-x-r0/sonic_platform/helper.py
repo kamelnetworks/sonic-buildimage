@@ -6,9 +6,6 @@ import subprocess
 from sonic_py_common import device_info
 from mmap import *
 
-HOST_CHK_CMD = "docker > /dev/null 2>&1"
-EMPTY_STRING = ""
-
 
 class APIHelper():
 
@@ -16,7 +13,7 @@ class APIHelper():
         (self.platform, self.hwsku) = device_info.get_platform_and_hwsku()
 
     def is_host(self):
-        return os.system(HOST_CHK_CMD) == 0
+        return not os.path.isfile('/.dockerenv')
 
     def pci_get_value(self, resource, offset):
         status = True

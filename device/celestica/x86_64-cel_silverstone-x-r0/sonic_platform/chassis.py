@@ -28,7 +28,8 @@ HOST_REBOOT_CAUSE_PATH = "/host/reboot-cause/"
 REBOOT_CAUSE_FILE = "reboot-cause.txt"
 PREV_REBOOT_CAUSE_FILE = "previous-reboot-cause.txt"
 GETREG_PATH = "/sys/devices/platform/sys_cpld/getreg"
-HOST_CHK_CMD = "docker > /dev/null 2>&1"
+STATUS_LED_MODE_PATH = '/sys/devices/platform/sys_cpld/sys_led'
+STATUS_LED_COLOR_PATH = '/sys/devices/platform/sys_cpld/sys_led_color'
 
 
 class Chassis(ChassisBase):
@@ -45,7 +46,7 @@ class Chassis(ChassisBase):
         self.fan_module_initialized = False
         self.__initialize_eeprom()
         self.is_host = self._api_helper.is_host()
-        
+
         if not self.is_host:
             self.__initialize_fan()
             self.__initialize_psu()
@@ -78,7 +79,7 @@ class Chassis(ChassisBase):
             self._fan_drawer_list.append(fandrawer)
             self._fan_list.extend(fandrawer._fan_list)
         self.fan_module_initialized = True
-    
+
     def __initialize_thermals(self):
         from sonic_platform.thermal import Thermal
         airflow = self.__get_air_flow()
@@ -154,7 +155,7 @@ class Chassis(ChassisBase):
         hw_reboot_cause = self._api_helper.get_cpld_reg_value(
             GETREG_PATH, RESET_REGISTER)
 
-        prev_reboot_cause = {    
+        prev_reboot_cause = {
             '0x11': (self.REBOOT_CAUSE_POWER_LOSS, "The last reset is Power on reset"),
             '0x22': (self.REBOOT_CAUSE_HARDWARE_OTHER, "The last reset is soft-set CPU warm reset"),
             '0x33': (self.REBOOT_CAUSE_HARDWARE_OTHER, "The last reset is soft-set CPU cold reset"),
@@ -162,7 +163,6 @@ class Chassis(ChassisBase):
             '0x55': (self.REBOOT_CAUSE_NON_HARDWARE, "The last reset is CPU cold reset"),
             '0x66': (self.REBOOT_CAUSE_WATCHDOG, "The last reset is watchdog reset"),
             '0x77': (self.REBOOT_CAUSE_HARDWARE_OTHER, "The last reset is power cycle reset")
-            
         }.get(hw_reboot_cause, (self.REBOOT_CAUSE_HARDWARE_OTHER, 'Unknown reason'))
 
         if sw_reboot_cause != 'Unknown':
@@ -287,7 +287,7 @@ class Chassis(ChassisBase):
     def get_thermal_manager(self):
         from .thermal_manager import ThermalManager
         return ThermalManager
-        
+
     def get_fan_status(self):
         if not self.fan_module_initialized:
             self.__initialize_fan()
@@ -298,9 +298,9 @@ class Chassis(ChassisBase):
                 content = content << 1 | 1
             else:
                 content = content << 1
-        
+
         return content
-        
+
     def get_transceiver_status(self):
         if not self.sfp_module_initialized:
             self.__initialize_sfp()
@@ -312,7 +312,7 @@ class Chassis(ChassisBase):
                 content = content | (1 << index)
             index = index + 1
         return content
-        
+
     def get_change_event(self, timeout=0):
         """
         Returns a nested dictionary containing all devices which have
@@ -345,7 +345,7 @@ class Chassis(ChassisBase):
                       status='5' High Temperature,
                       status='6' Bad cable.
         """
-            
+
         start_time = time.time()
         port_dict = {}
         fan_dict = {}
@@ -411,7 +411,7 @@ class Chassis(ChassisBase):
                 self.fan_init_status = value
                 change_dict['fan'] = fan_dict
                 change_event = True
-                
+
             if change_event:
                 return True, change_dict
 
@@ -427,5 +427,52 @@ class Chassis(ChassisBase):
                     return True, change_dict
         print("get_transceiver_change_event: Should not reach here.")
         return False, change_dict
-    
-    
+
+    def initizalize_system_led(self):
+        """
+        This function is not defined in chassis base class,
+        system-health command would invoke chassis.initizalize_system_led(),
+        add this stub function just to let the command sucessfully execute
+        """
+        pass
+
+    def set_status_led(self, color):
+        """
+        Sets the state of the PSU status LED
+        Args:
+            color: A string representing the color with which to set the PSU status LED
+                   Note: Only support green and off
+        Returns:
+            bool: True if status LED state is set successfully, False if not
+        """
+        set_status_color, set_status_mode = {
+            'green': ('green', 'on'),
+            'green_blink': ('green', '4k'),
+            'orange': ('yellow', 'on'),
+            'orange_blink': ('yellow', '4k'),
+            'both_blink': ('both', '4k'),
+            'off': ('off', 'off')
+        }.get(color, (None, None))
+        if not set_status_mode or not set_status_color:
+            return False
+
+        return (self._api_helper.write_txt_file(STATUS_LED_MODE_PATH, set_status_mode) and
+                self._api_helper.write_txt_file(STATUS_LED_COLOR_PATH, set_status_color))
+
+    def get_status_led(self):
+        """
+        Gets the state of the PSU status LED
+        Returns:
+            A string, one of the predefined STATUS_LED_COLOR_* strings above
+        """
+        led_status = self._api_helper.read_txt_file(STATUS_LED_MODE_PATH)
+        led_color = self._api_helper.read_txt_file(STATUS_LED_COLOR_PATH)
+
+        return {
+            ('green', 'on'): 'green',
+            ('green', '4k'): 'green_blink',
+            ('yellow', 'on'): 'orange',
+            ('yellow', '4k'): 'orange_blink',
+            ('both', '4k'): 'both_blink',
+            ('off', 'off'): 'off'
+        }.get((led_color, led_status), None)

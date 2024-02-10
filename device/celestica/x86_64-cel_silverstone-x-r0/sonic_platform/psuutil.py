@@ -25,16 +25,16 @@ class PsuUtil(PsuBase):
 
         if proc.returncode != 0:
             sys.exit(proc.returncode)
-    
+
         return out
-    
+
     def find_value(self, in_string):
         result = re.search("^.+ ([0-9a-f]{2}) .+$", in_string)
         if result:
             return result.group(1)
         else:
             return result
-        
+
     def get_num_psus(self):
         """
         Retrieves the number of PSUs available on the device
@@ -55,16 +55,13 @@ class PsuUtil(PsuBase):
         psu_id = self.psu1_id if index == 1 else self.psu2_id
         res_string = self.run_command(self.ipmi_raw + ' ' + psu_id)
         status_byte = self.find_value(res_string)
-        
+
         if status_byte is None:
             return False
 
-        failure_detected = (int(status_byte, 16) >> 1) & 1
-        input_lost = (int(status_byte, 16) >> 3) & 1
-        if failure_detected or input_lost:
-            return False
-        else:
-            return True
+        failure_detected = (((int(status_byte, 16) >> 1) & 1) != 0)
+        input_lost = (((int(status_byte, 16) >> 3) & 1) != 0)
+        return not (failure_detected or input_lost)
 
     def get_psu_presence(self, index):
         """
@@ -79,12 +76,8 @@ class PsuUtil(PsuBase):
         psu_id = self.psu1_id if index == 1 else self.psu2_id
         res_string = self.run_command(self.ipmi_raw + ' ' + psu_id)
         status_byte = self.find_value(res_string)
-        
+
         if status_byte is None:
             return False
-        
-        presence = ( int(status_byte, 16) >> 0 ) & 1
-        if presence:
-            return True
-        else:
-            return False
+
+        return ((int(status_byte, 16) >> 0 ) & 1) != 0
