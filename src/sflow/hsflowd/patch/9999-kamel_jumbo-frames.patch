@@ -1,0 +1,26 @@
+diff --git a/src/Linux/mod_dropmon.c b/src/Linux/mod_dropmon.c
+index 64c9e32..88c4de6 100644
+--- a/src/Linux/mod_dropmon.c
++++ b/src/Linux/mod_dropmon.c
+@@ -26,7 +26,7 @@ extern "C" {
+   #define DROPMON_GENL_NAME "NET_DM"
+ #endif
+ 
+-#define HSP_DROPMON_READNL_RCV_BUF 8192
++#define HSP_DROPMON_READNL_RCV_BUF 65664
+ #define HSP_DROPMON_READNL_BATCH 100
+ #define HSP_DROPMON_RCVBUF 8000000
+ #define HSP_DROPMON_QUEUE 100
+diff --git a/src/Linux/mod_psample.c b/src/Linux/mod_psample.c
+index 1858e86..21d16a2 100644
+--- a/src/Linux/mod_psample.c
++++ b/src/Linux/mod_psample.c
+@@ -21,7 +21,7 @@ extern "C" {
+ #define SOL_NETLINK 270
+ #endif
+ 
+-#define HSP_PSAMPLE_READNL_RCV_BUF 8192
++#define HSP_PSAMPLE_READNL_RCV_BUF 65664
+ #define HSP_PSAMPLE_READNL_BATCH 100
+ #define HSP_PSAMPLE_RCVBUF 8000000
+ 
