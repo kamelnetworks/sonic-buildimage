@@ -18,8 +18,8 @@ libboost-serialization1.74.0==1.74.0-9
 libbpf0==1:0.3-2
 libbrotli1==1.0.9-2+b2
 libbsd0==0.11.3-1+deb11u1
-libc-dev-bin==2.31-13+deb11u7
-libc6-dev==2.31-13+deb11u7
+libc-dev-bin==2.31-13+deb11u8
+libc6-dev==2.31-13+deb11u8
 libcap2==1:2.44-1
 libcap2-bin==1:2.44-1
 libcbor0==0.5.0+dfsg-2
@@ -105,7 +105,7 @@ libxtables12==1.8.7-1
 libyang==1.0.73
 libyang-cpp==1.0.73
 libzmq5==4.3.4-1
-linux-libc-dev==5.10.205-2
+linux-libc-dev==5.10.209-2
 lua-bitop==1.0.2-5
 lua-cjson==2.1.0+dfsg-2.1
 media-types==4.0.0

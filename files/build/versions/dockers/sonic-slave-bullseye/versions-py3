@@ -20,7 +20,7 @@ ctypesgen==1.0.2
 dbus-python==1.2.16
 deepdiff==6.2.2
 devscripts==2.21.3+deb11u1
-distro-info==1.0
+distro-info==1.0+deb11u1
 docutils==0.16
 fastentrypoints==0.12
 gbp==0.9.22
@@ -62,7 +62,7 @@ parse==1.6.6
 pexpect==4.8.0
 pillow==9.4.0
 pluggy==0.13.0
-protobuf==4.25.2
+protobuf==4.25.3
 ptyprocess==0.7.0
 py==1.10.0
 pyang==2.4.0
