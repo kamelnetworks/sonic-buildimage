@@ -28,11 +28,12 @@ start)
 
         sleep 2
         # One platform support two hwskus, auto select the correct hwsku
-        # If label is not either Questone-II or Questone-IIA, then Questone-IIA is used by default 
+        # If label is not either Questone-II or Questone-IIA, then Questone-IIA is used by default
+        # Also, the Arctica NX4808xxv is a branded Questone-II.
         hwsku_file="/usr/share/sonic/device/x86_64-cel_questone_2-r0/default_sku"
-        hwsku=$(decode-syseeprom | grep "Label" | awk '{print $5}')
+        hwsku=$(decode-syseeprom | grep "Label" | awk '{print $5 $6}')
         platform_path="/usr/share/sonic/device/x86_64-cel_questone_2-r0/"
-        if [ x$hwsku = x"Questone-II" ];then
+        if [ x$hwsku = x"Questone-II" ] || [ x$hwsku = x"ArcticaNX4808xxv" ];then
             echo "Questone_2 t1" > $hwsku_file
             cp ${platform_path}/Questone_2/platform_components.json $platform_path
             cp ${platform_path}/Questone_2/custom_led.bin $platform_path
