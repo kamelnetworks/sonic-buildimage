@@ -44,16 +44,18 @@ start)
     done
 
     # One platform support two hwskus, auto select the correct hwsku
-    # If label is not either Questone-II or Questone-IIA, then Questone-IIA is used by default 
+    # If label is not either Questone-II or Questone-IIA, then Questone-IIA is used by default
+    # Also, the Arctica NX4808xxv and R1N25A is a branded Questone-II.
     hwsku_file="/usr/share/sonic/device/x86_64-cel_questone_2-r0/default_sku"
     if [ ! -f $hwsku_file ]; then
         platform_path="/usr/share/sonic/device/x86_64-cel_questone_2-r0"
 
         sleep 1 # Wait for EEPROM driver initialization
-        hwsku=$(decode-syseeprom | grep "Label" | awk '{print $5}')
+        hwsku=$(decode-syseeprom | grep "Label" | awk '{print $5 $6}')
 
         cd ${platform_path}
-        if [ x$hwsku = x"Questone-II" ];then
+        if [ x$hwsku = x"Questone-II" ] || [ x$hwsku = x"ArcticaNX4808xxv" ] || \
+           [ x$hwsku = x"R1N25A" ]; then
             echo "Questone_2 t1" > $hwsku_file
             ln -sf ./Questone_2/platform.json platform.json
             ln -sf ./Questone_2/platform_components.json platform_components.json
