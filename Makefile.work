@@ -266,7 +266,7 @@ ifeq ($(DOCKER_BUILDER_WORKDIR),)
 override DOCKER_BUILDER_WORKDIR := "/sonic"
 endif
 
-DOCKER_RUN := docker run --rm=true --privileged --init \
+DOCKER_RUN := docker run --rm=true --privileged --init --ulimit nofile=262144:262144 \
     -v $(DOCKER_BUILDER_MOUNT) \
     -v "$(DOCKER_LOCKDIR):$(DOCKER_LOCKDIR)" \
     -w $(DOCKER_BUILDER_WORKDIR) \
