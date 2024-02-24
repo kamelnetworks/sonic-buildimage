@@ -1770,6 +1770,7 @@ class BGPConfigDaemon:
                            '+route_flap_dampen_max_suppress'],          '{no:no-prefix}bgp dampening {} {} {} {}', ['true', 'false']),
                          ('advertise-all-vni',                      '{no:no-prefix}advertise-all-vni', ['true','false']),
                          ('advertise-default-gw',                   '{no:no-prefix}advertise-default-gw', ['true','false']),
+                         ('advertise-svi-ip',                            '{no:no-prefix}advertise-svi-ip', ['true','false']),
                          ('advertise-ipv4-unicast',                      '{no:no-prefix}advertise ipv4 unicast', ['true','false']),
                          ('advertise-ipv6-unicast',                      '{no:no-prefix}advertise ipv6 unicast', ['true','false']),
                          ('default-originate-ipv4',                      '{no:no-prefix}default-originate ipv4', ['true','false']),
