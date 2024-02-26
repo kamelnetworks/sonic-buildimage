@@ -17,7 +17,7 @@ libcjson1==1.7.14-1
 libcrypt-dev==1:4.4.18-4
 libctf-nobfd0==2.35.2-2
 libctf0==2.35.2-2
-libcurl3-gnutls==7.74.0-1.3+deb11u11
+libcurl4-openssl-dev==7.74.0-1.3+deb11u11
 libexpat1-dev==2.2.10-2+deb11u5
 libgcc-10-dev==10.2.1-6
 libgomp1==10.2.1-6

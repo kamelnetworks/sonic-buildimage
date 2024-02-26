@@ -6,7 +6,7 @@ click==8.1.7
 clickclick==20.10.2
 connexion==2.7.0
 flask==3.0.2
-grpcio==1.60.1
+grpcio==1.62.0
 grpcio-tools==1.20.0
 idna==3.6
 importlib-metadata==7.0.1
