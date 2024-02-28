@@ -1471,12 +1471,12 @@ class ExtConfigDBConnector(ConfigDBConnector):
                 syslog.syslog(syslog.LOG_ERR, '[bgp cfgd] Failed handling config DB update with exception:' + str(e))
                 logging.exception(e)
 
-    def listen_thread(self, timeout):
+    def listen_thread(self):
         self.__listen_thread_running = True
         sub_key_space = "__keyspace@{}__:*".format(self.get_dbid(self.db_name))
         self.pubsub.psubscribe(sub_key_space)
         while self.__listen_thread_running:
-            msg = self.pubsub.get_message(timeout, True)
+            msg = self.pubsub.get_message(timeout=2.0, interrupt_on_signal=True)
             if msg:
                 self.sub_msg_handler(msg)
 
@@ -1486,7 +1486,7 @@ class ExtConfigDBConnector(ConfigDBConnector):
         """Start listen Redis keyspace events and will trigger corresponding handlers when content of a table changes.
         """
         self.pubsub = self.get_redis_client(self.db_name).pubsub()
-        self.sub_thread = threading.Thread(target=self.listen_thread, args=(0.01,))
+        self.sub_thread = threading.Thread(target=self.listen_thread)
         self.sub_thread.start()
 
     def stop_listen(self):
