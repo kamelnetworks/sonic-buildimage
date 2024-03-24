@@ -342,6 +342,9 @@ class Sfp(SfpBase):
 
         return eeprom_raw
 
+    def read_eeprom(self, offset, num_bytes):
+        return self.__read_eeprom_specific_bytes(offset, num_bytes)
+
     def _dom_capability_detect(self):
         if not self.get_presence():
             self.dom_supported = False
@@ -880,6 +883,12 @@ class Sfp(SfpBase):
 
         else:
             return None
+
+    def get_transceiver_status(self):
+        return {}
+
+    def get_transceiver_pm(self):
+        return {}
 
     def get_reset_status(self):
         """
