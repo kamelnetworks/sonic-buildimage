@@ -1,7 +1,6 @@
 applibs==1.mlnx.4.6.1062
 applibs-dev==1.mlnx.4.6.1062
 innovium-sai==3.1.2
-innovium-sai-headers==3.1.2
 innovium-shell==3.1.2
 kernel-mft-dkms==4.25.0-62
 libhiredis-dev==0.14.0-3
@@ -16,6 +15,8 @@ libnl-nf-3-200==3.5.0-1
 libnl-nf-3-dev==3.5.0-1
 libnl-route-3-200==3.5.0-1
 libnl-route-3-dev==3.5.0-1
+libsaibcm==8.4.0.2
+libsaibcm-dev==8.4.0.2
 libsaimetadata==1.0.0
 libsaimetadata-dev==1.0.0
 libsairedis==1.0.0
@@ -35,8 +36,9 @@ libthrift-dev==0.11.0-4
 libyang==1.0.73
 libyang-cpp==1.0.73
 libyang-dev==1.0.73
-linux-headers-5.10.0-18-2-amd64==5.10.140-1
-linux-headers-5.10.0-18-2-common==5.10.140-1
+linux-headers-5.10.0-23-2-amd64==5.10.179-3
+linux-headers-5.10.0-23-2-common==5.10.179-3
+mlnx-sai==1.mlnx.SAIBuild2211.25.1.6
 python3-swsscommon==1.0.0
 python3-yang==1.0.73
 sonic-mgmt-common==1.0.0
