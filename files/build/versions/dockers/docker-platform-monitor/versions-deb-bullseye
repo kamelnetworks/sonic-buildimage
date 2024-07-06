@@ -23,8 +23,8 @@ ipmitool==1.8.18-10.1
 iputils-ping==3:20210202-1
 libasan6==10.2.1-6
 libbinutils==2.35.2-2
-libc-dev-bin==2.31-13+deb11u8
-libc6-dev==2.31-13+deb11u8
+libc-dev-bin==2.31-13+deb11u10
+libc6-dev==2.31-13+deb11u10
 libcairo2==1.16.0-5
 libcc1-0==10.2.1-6
 libcrypt-dev==1:4.4.18-4
@@ -39,7 +39,7 @@ libfreeipmi17==1.6.6-4+deb11u1
 libfreetype6==2.10.4+dfsg-1+deb11u1
 libfribidi0==1.0.8-2+deb11u1
 libgcc-10-dev==10.2.1-6
-libglib2.0-0==2.66.8-1+deb11u1
+libglib2.0-0==2.66.8-1+deb11u4
 libgomp1==10.2.1-6
 libgraphite2-3==1.3.14-1
 libharfbuzz0b==2.7.4-1
@@ -83,7 +83,7 @@ libxdmcp6==1:1.1.2-3
 libxext6==2:1.3.3-1.1
 libxml2==2.9.10+dfsg-6.7+deb11u4
 libxrender1==1:0.9.10-1
-linux-libc-dev==5.10.209-2
+linux-libc-dev==5.10.218-1
 lm-sensors==1:3.6.0-7
 make==4.3-4.1
 mft==4.25.0-62
@@ -115,6 +115,6 @@ sx-gen-utils-dev==1.mlnx.4.6.1062
 sxd-libs==1.mlnx.4.6.1062
 sxd-libs-dev==1.mlnx.4.6.1062
 ucf==3.0043
-udev==247.3-7+deb11u4
+udev==247.3-7+deb11u5
 xz-utils==5.2.5-2.1~deb11u1
 zlib1g-dev==1:1.2.11.dfsg-2+deb11u2

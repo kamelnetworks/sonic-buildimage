@@ -1,6 +1,6 @@
-innovium-sai==3.1.2
-innovium-sai-headers==3.1.2
-innovium-shell==3.1.2
+innovium-sai==3.1.4
+innovium-sai-headers==3.1.4
+innovium-shell==3.1.4
 libsaimetadata==1.0.0
 libsairedis==1.0.0
 libyaml-0-2==0.2.2-1

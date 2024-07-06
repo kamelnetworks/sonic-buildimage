@@ -9,15 +9,15 @@ gcc==4:10.2.1-1
 gcc-10==10.2.1-6
 libasan6==10.2.1-6
 libbinutils==2.35.2-2
-libc-dev-bin==2.31-13+deb11u8
-libc6-dev==2.31-13+deb11u8
+libc-dev-bin==2.31-13+deb11u10
+libc6-dev==2.31-13+deb11u10
 libcc1-0==10.2.1-6
 libcjson-dev==1.7.14-1
 libcjson1==1.7.14-1
 libcrypt-dev==1:4.4.18-4
 libctf-nobfd0==2.35.2-2
 libctf0==2.35.2-2
-libcurl4-openssl-dev==7.74.0-1.3+deb11u11
+libcurl4-openssl-dev==7.74.0-1.3+deb11u12
 libexpat1-dev==2.2.10-2+deb11u5
 libgcc-10-dev==10.2.1-6
 libgomp1==10.2.1-6
@@ -38,7 +38,7 @@ libtirpc-dev==1.3.1-1+deb11u1
 libtsan0==10.2.1-6
 libubsan1==10.2.1-6
 libxml2==2.9.10+dfsg-6.7+deb11u4
-linux-libc-dev==5.10.209-2
+linux-libc-dev==5.10.218-1
 python3-dev==3.9.2-3
 python3.9-dev==3.9.2-1
 sonic-mgmt-common==1.0.0
