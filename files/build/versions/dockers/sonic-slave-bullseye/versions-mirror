@@ -1,4 +1,2 @@
-deb.debian.org_debian_dists_bullseye-backports==2024-07-04T20:25:53Z
-deb.debian.org_debian_dists_bullseye-updates==2024-07-04T20:25:53Z
-debian-archive.trafficmanager.net_debian_dists_bullseye-backports==2024-07-04T20:25:53Z
-debian-archive.trafficmanager.net_debian_dists_bullseye-updates==2024-07-04T20:25:53Z
+debian-archive.trafficmanager.net_debian_dists_bullseye-backports==2024-08-06T02:13:34Z
+debian-archive.trafficmanager.net_debian_dists_bullseye-updates==2024-08-06T02:13:35Z

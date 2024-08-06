@@ -92,7 +92,7 @@ libubsan1==10.2.1-6
 libwrap0==7.6.q-31
 libxtables12==1.8.7-1
 libzmq5==4.3.4-1+deb11u1
-linux-libc-dev==5.10.218-1
+linux-libc-dev==5.10.221-1
 lua-bitop==1.0.2-5
 lua-cjson==2.1.0+dfsg-2.1
 make==4.3-4.1

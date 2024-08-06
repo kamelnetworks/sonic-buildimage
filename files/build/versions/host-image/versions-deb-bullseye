@@ -171,6 +171,7 @@ libgomp1==10.2.1-6
 libgpm2==1.20.7-8
 libgrpc++1==1.30.2-3
 libgrpc10==1.30.2-3
+libgssapi-krb5-2==1.18.3-6+deb11u5
 libhavege2==1.9.14-1
 libhiredis0.14==0.14.0-3
 libi2c0==4.2-1+b1
@@ -188,8 +189,11 @@ libjs-jquery==3.5.1+dfsg+~3.5.5-7
 libjs-sphinxdoc==3.4.3-2
 libjs-underscore==1.9.1~dfsg-3
 libjson-c5==0.15-2+deb11u1
+libk5crypto3==1.18.3-6+deb11u5
 libklibc==2.0.8-6.1
 libkmod2==28-1
+libkrb5-3==1.18.3-6+deb11u5
+libkrb5support0==1.18.3-6+deb11u5
 libksba8==1.5.0-3+deb11u2
 libldap-2.4-2==2.4.57+dfsg-3+deb11u1
 liblognorm5==2.0.5-1.1
@@ -311,9 +315,9 @@ libyang-cpp==1.0.73
 libzmq5==4.3.4-1+deb11u1
 linux-base==4.6
 linux-image-5.10.0-23-2-amd64-unsigned==5.10.179-3
-linux-libc-dev==5.10.218-1
-linux-perf==5.10.218-1
-linux-perf-5.10==5.10.218-1
+linux-libc-dev==5.10.221-1
+linux-perf==5.10.221-1
+linux-perf-5.10==5.10.221-1
 locales==2.31-13+deb11u10
 logrotate==3.18.0-2+deb11u2
 lsb-release==11.1.0

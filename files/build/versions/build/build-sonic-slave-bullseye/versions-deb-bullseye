@@ -38,6 +38,7 @@ libyang-cpp==1.0.73
 libyang-dev==1.0.73
 linux-headers-5.10.0-23-2-amd64==5.10.179-3
 linux-headers-5.10.0-23-2-common==5.10.179-3
+mlnx-sai==1.mlnx.SAIBuild2211.25.1.6
 python3-swsscommon==1.0.0
 python3-yang==1.0.73
 sonic-mgmt-common==1.0.0
