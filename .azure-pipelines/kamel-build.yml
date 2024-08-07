@@ -7,31 +7,6 @@
 #   --repository https://github.com/kamelnetworks/sonic-buildimage \
 #   --branch master \
 #   --yml-path .azure-pipelines/kamel-build.yml
-#
-# The VMSS pool uses Ubuntu 20.04 with the following cloud-init:
-# #cloud-config
-# disk_setup:
-#   /dev/disk/azure/scsi1/lun1:
-#     table_type: gpt
-#     layout: True
-#     overwrite: True
-#   /dev/disk/azure/scsi1/lun2:
-#     table_type: gpt
-#     layout: True
-#     overwrite: True
-# fs_setup:
-#   - device: /dev/disk/azure/scsi1/lun1
-#     label: agent_disk
-#     partition: 1
-#     filesystem: btrfs
-#   - device: /dev/disk/azure/scsi1/lun2
-#     label: docker_disk
-#     partition: 1
-#     filesystem: btrfs
-# mounts:
-#   - [ /dev/disk/by-label/agent_disk, /agent ]
-#   - [ /dev/disk/by-label/docker_disk, /var/lib/docker ]
-
 
 resources:
   repositories:
