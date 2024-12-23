@@ -79,8 +79,6 @@ jobs:
     displayName: 'Reset submodules'
   - script: |
       set -e
-      sudo modprobe overlay
-      sudo apt-get install -y acl
       export DOCKER_DATA_ROOT_FOR_MULTIARCH=/data/march/docker
       CACHE_OPTIONS="SONIC_DPKG_CACHE_METHOD=${{ parameters.cache_mode }} SONIC_DPKG_CACHE_SOURCE=/nfs/dpkg_cache/${{ parameters.platform }}"
       # ENABLE_SBOM=y emits CycloneDX SBOMs alongside every .bin and
