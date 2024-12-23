@@ -4,7 +4,7 @@
   branch = 202411
 [submodule "sonic-linux-kernel"]
 	path = src/sonic-linux-kernel
-	url = https://github.com/sonic-net/sonic-linux-kernel
+	url = https://github.com/kamelnetworks/sonic-linux-kernel
   branch = 202411
 [submodule "sonic-sairedis"]
 	path = src/sonic-sairedis
@@ -12,7 +12,7 @@
   branch = 202411
 [submodule "sonic-swss"]
 	path = src/sonic-swss
-	url = https://github.com/sonic-net/sonic-swss
+	url = https://github.com/kamelnetworks/sonic-swss
   branch = 202411
 [submodule "src/p4c-bm/p4c-bm"]
 	path = platform/p4/p4c-bm/p4c-bm
@@ -116,7 +116,7 @@
   branch = 202411
 [submodule "src/sonic-host-services"]
 	path = src/sonic-host-services
-	url = https://github.com/sonic-net/sonic-host-services
+	url = https://github.com/kamelnetworks/sonic-host-services
   branch = 202411
 [submodule "src/sonic-gnmi"]
 	path = src/sonic-gnmi
