@@ -86,10 +86,14 @@ stages:
     - download: current
       patterns: |
         **/target/docker-*-dbg.gz
-        **/target/sonic-broadcom.*
-        **/target/sonic-aboot-broadcom.*
-        **/target/sonic-mellanox.*
-        **/target/sonic-marvell-teralynx.*
+        **/target/sonic-broadcom.bin
+        **/target/sonic-broadcom.bin.log
+        **/target/sonic-aboot-broadcom.swi
+        **/target/sonic-aboot-broadcom.swi.log
+        **/target/sonic-mellanox.bin
+        **/target/sonic-mellanox.bin.log
+        **/target/sonic-marvell-teralynx.bin
+        **/target/sonic-marvell-teralynx.bin.log
     - script: |
         cd $(Pipeline.Workspace)/
         # Example:
