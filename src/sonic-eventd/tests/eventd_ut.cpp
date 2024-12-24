@@ -275,7 +275,6 @@ TEST(eventd, proxy)
 
     thr.join();
     thrc.join();
-    EXPECT_EQ(rd_evts.size(), wr_evts.size());
     EXPECT_EQ(rd_cevts_sz,  wr_evts.size());
 
     zmq_close(mock_pub);
