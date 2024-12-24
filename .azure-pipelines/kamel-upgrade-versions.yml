@@ -6,7 +6,7 @@ resources:
     type: github
     name: kamelnetworks/sonic-buildimage
     endpoint: github
-    ref: 202211
+    ref: 202411
 
 trigger: none
 pr: none
@@ -85,9 +85,9 @@ stages:
         - name: mellanox
           variables:
             platform_rpc: mlnx
-        - name: innovium
+        - name: marvell-teralynx
           variables:
-            platform_rpc: invm
+            platform_rpc: mvtx
 
 - stage: UpgradeVersions
   jobs:
