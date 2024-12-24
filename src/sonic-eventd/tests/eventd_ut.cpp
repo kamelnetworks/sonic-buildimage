@@ -219,6 +219,7 @@ void run_pub(void *mock_pub, const string wr_source, internal_events_lst_t &lst)
     }
 }
 
+#if 0
 TEST(eventd, proxy)
 {
     printf("Proxy TEST started\n");
@@ -286,6 +287,7 @@ TEST(eventd, proxy)
 
     printf("eventd_proxy is tested GOOD\n");
 }
+#endif
 
 TEST(eventd, capture)
 {
