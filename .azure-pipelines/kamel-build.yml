@@ -64,9 +64,10 @@ stages:
       jobGroups:
         - name: broadcom
           variables:
-            swi_image: yes
             platform_rpc: brcm
             dbg_image: yes
+            # set to yes to build for Arista *in addition* to ONIE, adds about 30min of build time
+            swi_image: no
         - name: mellanox
           variables:
             platform_rpc: mlnx
