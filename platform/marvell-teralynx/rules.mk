@@ -1,7 +1,7 @@
 include $(PLATFORM_PATH)/sai.mk
 include $(PLATFORM_PATH)/platform-modules-cel.mk
 include $(PLATFORM_PATH)/platform-modules-supermicro.mk
-include $(PLATFORM_PATH)/platform-modules-wistron.mk
+#include $(PLATFORM_PATH)/platform-modules-wistron.mk
 include $(PLATFORM_PATH)/platform-modules-marvell.mk
 include $(PLATFORM_PATH)/docker-syncd-mrvl-teralynx.mk
 include $(PLATFORM_PATH)/docker-syncd-mrvl-teralynx-rpc.mk
