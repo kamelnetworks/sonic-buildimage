@@ -1,0 +1,13 @@
+binutils==2.40-2
+binutils-x86-64-linux-gnu==2.40-2
+innovium-sai==4.0.1
+innovium-sai-headers==4.0.1
+innovium-shell==4.0.1
+libbinutils==2.40-2
+libctf-nobfd0==2.40-2
+libctf0==2.40-2
+libgprofng0==2.40-2
+libsaimetadata==1.0.0
+libsairedis==1.0.0
+libyaml-dev==0.2.5-1
+syncd==1.0.0
