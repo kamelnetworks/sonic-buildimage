@@ -1,0 +1,38 @@
+{
+    "chassis": {
+        "Silverstone-x": {
+            "component": {
+                "Main_BMC": {
+                    "firmware": "/usr/local/lib/firmware/x86_64-cel_silverstone-x-r0/R3240-JF018-01_SilverstoneX_2.20.ima",
+                    "version": "2.30"},
+                "Backup_BMC": {
+                    "firmware": "/usr/local/lib/firmware/x86_64-cel_silverstone-x-r0/R3240-JF018-01_SilverstoneX_2.20.ima",
+                    "version": "2.30"},
+                "Main_BIOS": {
+                    "firmware": "/usr/local/lib/firmware/x86_64-cel_silverstone-x-r0/SilverstoneX_BIOS_2.0.0.BIN",
+                    "version": "2.0.0"},
+                "Backup_BIOS": {
+                    "firmware": "/usr/local/lib/firmware/x86_64-cel_silverstone-x-r0/SilverstoneX_BIOS_2.0.0.BIN",
+                    "version": "2.0.0"},
+                "SYSCPLD": {
+                    "firmware": "/usr/local/lib/firmware/x86_64-cel_silverstone-x-r0/silverstoneX_DVT_C_V11.vme",
+                    "version": "1.1"},
+                "SWCPLD1": {
+                    "firmware": "/usr/local/lib/firmware/x86_64-cel_silverstone-x-r0/silverstoneX_DVT_Sw1_V05_Sw2_V05.vme",
+                    "version": "0.5"},
+                "SWCPLD2": {
+                    "firmware": "/usr/local/lib/firmware/x86_64-cel_silverstone-x-r0/silverstoneX_DVT_Sw1_V05_Sw2_V05.vme",
+                    "version": "0.5"},
+                "BCPLD": {
+                    "firmware": "/usr/local/lib/firmware/x86_64-cel_silverstone-x-r0/silverstoneX_DVT_B_V07.vme",
+                    "version": "0.7"},
+                "FANCPLD": {
+                    "firmware": "/usr/local/lib/firmware/x86_64-cel_silverstone-x-r0/silverstoneX_DVT_F_V02.vme",
+                    "version": "2"},
+                "FPGA": {
+                    "firmware": "/usr/local/lib/firmware/x86_64-cel_silverstone-x-r0/User.bin",
+                    "version": "00040001"}
+                }
+        }
+    }
+}
