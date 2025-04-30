@@ -2,4 +2,3 @@
 switch-to-debhelper.patch
 keep-symbol-versions-in-libraries.patch
 update-changelog.patch
-skip-tests-when-having-no-private-netns.patch
