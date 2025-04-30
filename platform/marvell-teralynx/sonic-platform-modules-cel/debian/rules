@@ -13,6 +13,8 @@ MODULE_DIRS:= midstone-200i silverstone-x
 override_dh_auto_build:
 	(for mod in $(MODULE_DIRS); do \
 		make -C $(KERNEL_SRC)/build M=$(MOD_SRC_DIR)/$${mod}/modules; \
+		cd $(MOD_SRC_DIR)/$${mod}; \
+		test -f setup.py && python3 setup.py bdist_wheel -d $(MOD_SRC_DIR)/$${mod}/modules; \
 	done)
 
 override_dh_auto_install:

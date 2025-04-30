@@ -192,7 +192,6 @@ begin:
         goto begin;
     }
     status = count;
-exit:
     mutex_unlock(&cpld_data->cpld_lock);
     return status;
 }

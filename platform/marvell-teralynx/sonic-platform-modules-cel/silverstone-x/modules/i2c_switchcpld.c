@@ -554,7 +554,7 @@ fail_alloc_switchboard_data:
     return err;
 }
 
-static int switchboard_remove(struct i2c_client *client)
+static void switchboard_remove(struct i2c_client *client)
 {
     u8 portid = 0;
     struct sff_device_data *new_data;
@@ -577,7 +577,6 @@ static int switchboard_remove(struct i2c_client *client)
     }
     sysfs_remove_group(&dev->kobj, &switchboard_attrs_grp);
     index++;
-    return 0;
 }
 
 static const struct i2c_device_id switchboard_ids[] = {

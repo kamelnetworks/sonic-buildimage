@@ -561,7 +561,7 @@ static struct cls_xcvr_platform_data xcvr_data[] = {
 static int cls_fpga_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {	
 	int err;
-	int num_i2c_bus, i = 0, ret, vector;
+	int num_i2c_bus, i = 0, ret;
 	int bmc_present = 0;   /* 0-present 1-absent */
 	unsigned long rstart;
 	void __iomem *base_addr;
@@ -641,8 +641,8 @@ static int cls_fpga_probe(struct pci_dev *dev, const struct pci_device_id *id)
     fpga_res[0].end += rstart;
 	xcvr_res[0].start += rstart;
 	xcvr_res[0].end += rstart;
-	printk("num_i2c_bus = %x,fpga_res start/end %x/%x,restart=%x\n",num_i2c_bus,fpga_res[0].start ,fpga_res[0].end,rstart );
-    printk("num_i2c_bus = %x,xcvr_res start/end %x/%x,restart=%x\n",num_i2c_bus,xcvr_res[0].start ,xcvr_res[0].end,rstart );
+	printk("num_i2c_bus = %x,fpga_res start/end %llx/%llx,restart=%lx\n",num_i2c_bus,fpga_res[0].start ,fpga_res[0].end,rstart );
+    printk("num_i2c_bus = %x,xcvr_res start/end %llx/%llx,restart=%lx\n",num_i2c_bus,xcvr_res[0].start ,xcvr_res[0].end,rstart );
 
 	priv->i2c_devname = "fpga-xiic-i2c";
 	priv->xcvr_devname = "fpga-xcvr";
@@ -691,7 +691,7 @@ static int cls_fpga_probe(struct pci_dev *dev, const struct pci_device_id *id)
 		/* all fpga i2c bus share pci device msi irq */
 		i2c_bus_configs[i].pdata.irq = dev->irq;
 		dev_dbg(&dev->dev, "i2c-bus.%d: 0x%llx - 0x%llx\n",i2c_bus_configs[i].id, i2c_bus_configs[i].res[0].start, i2c_bus_configs[i].res[0].end);
-		printk("bus id:%d, i2c_bus_configs[%d].res[0].start/end=%x:%x\n", i2c_bus_configs[i].id, i, i2c_bus_configs[i].res[0].start,i2c_bus_configs[i].res[0].end);
+		printk("bus id:%d, i2c_bus_configs[%d].res[0].start/end=%llx:%llx\n", i2c_bus_configs[i].id, i, i2c_bus_configs[i].res[0].start,i2c_bus_configs[i].res[0].end);
 
 		switch (i + 1) {
 		case 1:
@@ -751,7 +751,7 @@ static int cls_fpga_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	priv->i2cbuses_pdev = i2cbuses_pdev;
 	priv->xcvr_pdev = xcvr_pdev;
 	priv->fpga_pdev = fpga_pdev;
-	printk("base_addr=%x\n",base_addr);
+	printk("base_addr=%p\n",base_addr);
 	return 0;
 
 err_unregister_ocore:

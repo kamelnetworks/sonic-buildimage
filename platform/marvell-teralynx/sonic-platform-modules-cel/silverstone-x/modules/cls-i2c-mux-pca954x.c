@@ -306,12 +306,11 @@ virt_reg_failed:
 	return ret;
 }
 
-static int pca954x_remove(struct i2c_client *client)
+static void pca954x_remove(struct i2c_client *client)
 {
 	struct i2c_mux_core *muxc = i2c_get_clientdata(client);
 
 	i2c_mux_del_adapters(muxc);
-	return 0;
 }
 
 #ifdef CONFIG_PM_SLEEP
