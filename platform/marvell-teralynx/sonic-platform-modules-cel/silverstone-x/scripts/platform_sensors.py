@@ -27,7 +27,7 @@ def ipmi_sensor_dump(cmd):
     except subprocess.CalledProcessError as e:
         logging.error('Error! Failed to execute: {}'.format(cmd))
         sys.exit(1)
-    return sensor_dump
+    return sensor_dump.decode()
 
 def get_reading_by_name(sensor_name, sdr_elist_dump):
     '''
