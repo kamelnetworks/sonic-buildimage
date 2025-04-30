@@ -44,10 +44,6 @@ stages:
       value: 3
     - name: SONIC_BUILD_RETRY_INTERVAL
       value: 600
-    - name: NOSTRETCH  # Disable legacy Debian stretch containers, no services we care about use it
-      value: 1
-    - name: NOBUSTER  # Disable legacy Debian buster containers, we have upgraded the containers
-      value: 1
     - name: SONIC_SLAVE_DOCKER_DRIVER
       value: overlay2
     - name: REGISTRY_SERVER_PATH
