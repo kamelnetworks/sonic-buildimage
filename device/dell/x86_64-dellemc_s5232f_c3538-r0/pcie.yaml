@@ -65,18 +65,6 @@
   name: 'USB controller: Intel Corporation Atom Processor C3000 Series USB 3.0 xHCI
     Controller (rev 11)'
 - bus: '00'
-  dev: '16'
-  fn: '0'
-  id: 19d1
-  name: 'PCI bridge: Intel Corporation Atom Processor C3000 Series Integrated LAN
-    Root Port #0 (rev 11)'
-- bus: '00'
-  dev: '17'
-  fn: '0'
-  id: 19d2
-  name: 'PCI bridge: Intel Corporation Atom Processor C3000 Series Integrated LAN
-    Root Port #1 (rev 11)'
-- bus: '00'
   dev: '18'
   fn: '0'
   id: 19d3
@@ -152,25 +140,3 @@
   fn: '0'
   id: '7021'
   name: 'Non-VGA unclassified device: Xilinx Corporation Device 7021'
-- bus: '06'
-  dev: '00'
-  fn: '0'
-  id: 15ce
-  name: 'Ethernet controller: Intel Corporation Ethernet Connection X553 10 GbE SFP+
-    (rev 11)'
-- bus: '06'
-  dev: '00'
-  fn: '1'
-  id: 15ce
-  name: 'Ethernet controller: Intel Corporation Ethernet Connection X553 10 GbE SFP+
-    (rev 11)'
-- bus: 08
-  dev: '00'
-  fn: '0'
-  id: 15cf
-  name: 'Ethernet controller: Intel Corporation Device 15cf (rev 11)'
-- bus: 08
-  dev: '00'
-  fn: '1'
-  id: 15cf
-  name: 'Ethernet controller: Intel Corporation Device 15cf (rev 11)'
