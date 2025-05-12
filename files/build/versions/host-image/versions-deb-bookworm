@@ -78,7 +78,7 @@ isc-dhcp-client==4.4.3-P1-2
 j2cli==0.3.12b-4
 jq==1.6-2.1
 kdump-tools==1:1.8.1
-kernel-mft-dkms-modules-6.1.0-29-2-amd64==4.30.2
+kernel-mft-dkms-modules-6.1.0-22-2-amd64==4.30.2
 kexec-tools==1:2.0.25-3+deb12u1
 klibc-utils==2.0.12-1
 kmod==30+20221128-1
@@ -265,7 +265,7 @@ libyang==1.0.73
 libyang-cpp==1.0.73
 libzmq5==4.3.4-6
 linux-base==4.9
-linux-image-6.1.0-29-2-amd64-unsigned==6.1.123-1
+linux-image-6.1.0-22-2-amd64-unsigned==6.1.94-1
 linux-perf==6.1.135-1
 locales==2.36-9+deb12u10
 logrotate==3.21.0-1

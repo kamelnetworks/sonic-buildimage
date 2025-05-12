@@ -1,12 +1,7 @@
-debian==20250429T001650Z
-debian-archive.trafficmanager.net_debian-security_dists_bookworm-security==2025-04-29T11:43:05Z
-debian-archive.trafficmanager.net_debian-security_dists_bullseye-security==2025-04-29T11:43:06Z
+debian==20250512T001731Z
+debian-archive.trafficmanager.net_debian-security_dists_bookworm-security==2025-05-12T20:53:05Z
 debian-archive.trafficmanager.net_debian_dists_bookworm==2025-03-15T09:09:36Z
-debian-archive.trafficmanager.net_debian_dists_bookworm-backports==2025-04-29T20:38:24Z
-debian-archive.trafficmanager.net_debian_dists_bookworm-updates==2025-04-29T20:38:24Z
-debian-archive.trafficmanager.net_debian_dists_bullseye==2024-08-31T11:02:15Z
-debian-archive.trafficmanager.net_debian_dists_bullseye-backports==2025-04-29T20:38:24Z
-debian-archive.trafficmanager.net_debian_dists_bullseye-updates==2025-04-29T20:38:24Z
-debian-security==20250429T001533Z
+debian-archive.trafficmanager.net_debian_dists_bookworm-backports==2025-05-12T20:13:54Z
+debian-archive.trafficmanager.net_debian_dists_bookworm-updates==2025-05-12T20:13:54Z
+debian-security==20250512T001708Z
 download.docker.com_linux_debian_dists_bookworm==2025-04-28T09:11:29Z
-download.docker.com_linux_debian_dists_bullseye==2025-04-18T10:44:50Z

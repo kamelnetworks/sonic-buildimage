@@ -29,8 +29,8 @@ libteamdctl0==1.31-1
 libyang==1.0.73
 libyang-cpp==1.0.73
 libyang-dev==1.0.73
-linux-headers-6.1.0-29-2-amd64==6.1.123-1
-linux-headers-6.1.0-29-2-common==6.1.123-1
+linux-headers-6.1.0-22-2-amd64==6.1.94-1
+linux-headers-6.1.0-22-2-common==6.1.94-1
 python3-swsscommon==1.0.0
 python3-yang==1.0.73
 sonic-bmp==0.1
