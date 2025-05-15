@@ -55,7 +55,7 @@ start)
 
         cd ${platform_path}
         if [ x$hwsku = x"Questone-II" ] || [ x$hwsku = x"ArcticaNX4808xxv" ] || \
-           [ x$hwsku = x"R1N25A" ]; then
+           [ x$hwsku = x"R1N25A" ] || [ x$hwsku = x"R1N26A" ]; then
             echo "Questone_2 t1" > $hwsku_file
             ln -sf ./Questone_2/platform.json platform.json
             ln -sf ./Questone_2/platform_components.json platform_components.json
