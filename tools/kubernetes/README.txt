@@ -60,3 +60,10 @@ of an incremental build speedup; measure both after the first successful image.
 preflight.yaml provides a separate temporary 70 GiB workspace to diagnose runtime
 and component compilation while persistent storage is unavailable. It is not an
 image-build workspace. Deleting that pod deletes its source, logs and build cache.
+
+An additional ephemeral-builder.yaml targets k8s-1 with a 150 GiB local workspace,
+750m CPU / 24 GiB memory requests and 8 CPU / 48 GiB memory limits. This is a
+cluster-specific fallback when the PVC cannot mount. Check node filesystem space
+and existing requests before using it. Kubernetes may evict it under disk pressure;
+copy logs and final artifacts out promptly. The persistent manifest remains the
+preferred configuration for repeatable builds and incremental caches.
