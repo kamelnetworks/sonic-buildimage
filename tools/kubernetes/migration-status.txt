@@ -58,6 +58,8 @@ Validation completed:
 Outstanding at this checkpoint:
   Exact SONiC 6.12.41 kernel build, host-services package/tests, Marvell image build,
     boot/hardware validation, Broadcom and Mellanox image validation.
+  Review the inherited eventd proxy-test disablement (old issue #20494); it remains
+    in the fork patch stack pending an actual eventd test run.
   Compare cold and incremental build timings after a successful full image.
   Publish component commits before publishing a normally recursive-clonable root
     migration branch. Local bundles can seed the component objects until then.
