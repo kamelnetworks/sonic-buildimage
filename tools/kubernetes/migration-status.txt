@@ -80,6 +80,9 @@ Cluster storage:
   Namespace sonic-build, PVC sonic-work: 500 GiB, tera-compressed.
   PVC is Bound and attaches on k8s-4, but CSI mount repeatedly times out while
     multipathd queries time out. No shared CSI service was restarted or changed.
+  A subsequent diagnostic mount on k8s-1 succeeded: 492 GiB available, ext4,
+    read/write check passed. A recovery snapshot is being copied to the PVC;
+    the active kernel build remains on its original temporary workspace.
   Temporary sonic-preflight on k8s-4: 70 GiB emptyDir for compatibility checks.
   Temporary sonic-image-builder on k8s-1: 150 GiB emptyDir for continued builds.
   Temporary workspaces disappear when their pods are deleted. Export logs/artifacts.
