@@ -1,0 +1,87 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sonic-build
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sonic-work
+  namespace: sonic-build
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: tera-compressed
+  resources:
+    requests:
+      storage: 500Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sonic-builder
+  namespace: sonic-build
+  labels:
+    app: sonic-builder
+spec:
+  automountServiceAccountToken: false
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/os: linux
+    kubernetes.io/arch: amd64
+  containers:
+    - name: builder
+      image: ubuntu:22.04
+      securityContext:
+        privileged: true
+      resources:
+        requests:
+          cpu: '4'
+          memory: 32Gi
+        limits:
+          cpu: '8'
+          memory: 48Gi
+      env:
+        - name: DEBIAN_FRONTEND
+          value: noninteractive
+      command: [/bin/bash, -ec]
+      args:
+        - |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl docker.io docker-buildx git make sudo python3-pip python3-venv kmod jq util-linux iptables rsync wget unzip zip build-essential fakeroot dpkg-dev libtool-bin uuid-dev
+          python3 -m pip install jinjanator
+          id builder >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash -G docker builder
+          printf 'builder ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/builder
+          mkdir -p /work/src /work/logs /work/cache /var/cache/sonic/artifacts
+          chown builder:builder /work/src /work/logs /work/cache /var/cache/sonic/artifacts
+          dockerd --host=unix:///var/run/docker.sock --storage-driver=overlay2 --mtu="$(cat /sys/class/net/eth0/mtu)" > /work/logs/dockerd.log 2>&1 &
+          for attempt in $(seq 1 60); do
+            docker info >/dev/null 2>&1 && break
+            sleep 1
+          done
+          docker info
+          touch /tmp/builder-ready
+          exec sleep infinity
+      readinessProbe:
+        exec:
+          command: [/bin/bash, -ec, "test -f /tmp/builder-ready; docker info >/dev/null 2>&1"]
+        periodSeconds: 10
+        timeoutSeconds: 5
+      volumeMounts:
+        - name: work
+          mountPath: /work
+          subPath: work
+        - name: work
+          mountPath: /var/lib/docker
+          subPath: docker
+        - name: shm
+          mountPath: /dev/shm
+  volumes:
+    - name: work
+      persistentVolumeClaim:
+        claimName: sonic-work
+    - name: shm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 4Gi
