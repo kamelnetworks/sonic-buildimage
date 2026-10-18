@@ -1,4 +1,4 @@
-Migration checkpoint, 2026-10-18
+Migration checkpoint, 2026-10-19 (Europe/Stockholm)
 
 Target: upstream sonic-net/sonic-buildimage master
   8ef49ca84e5036d5bb9f82350b46f20d70c19bc7
@@ -51,7 +51,11 @@ Adaptations after replay:
     chmod 0775 preserves that bit on shared PVC directories and dpkg-deb rejects it.
   Native-daemon builds unmask container system paths so libnl namespace tests can
     mount a fresh read-only sysfs. The Kubernetes helper allocates a Docker terminal
-    through SONIC_BUILDER_EXTRA_CMDLINE for libyang's interactive Tcl tests.
+    through SONIC_BUILDER_EXTRA_CMDLINE for libyang's interactive Tcl tests, with
+    --interactive=false to override the wrapper's stdin attachment in headless jobs.
+  Docker's cgroup parent is the Kubernetes pod cgroup, preserving aggregate pod
+    limits. The default daemon otherwise creates siblings under /docker outside
+    the pod. Confirmed an explicitly placed container inherits 4 CPU / 16 GiB.
 
 Validation completed:
   Ubuntu 22.04 pod on Talos 6.18.54, Docker 29.1.3, overlay2 on XFS.
@@ -67,6 +71,13 @@ Validation completed:
     received its missing fake-filesystem fixture.
   Kernel configuration unit tests pass. The real 6.12.41 generated .config also
     confirms CONFIG_DEBUG_INFO_NONE=y and disabled DWARF variants.
+  Exact SONiC 6.12.41 kernel, common/architecture headers and kbuild Debian packages
+    build successfully in the pod. Cold package build: 1h 9m. Removed the generated
+    common-header package and repeated its target: restored from cache in 24 seconds
+    end to end (2 seconds inside the package recipe). All four package SHA-256 values
+    match the saved originals. This is not a full-image timing comparison.
+  The four kernel packages and checksums are saved outside Kubernetes under
+    build-support/artifacts/kernel-6.12.41; the package cache is copied to the PVC.
   Completed non-FIPS slave image 727c90ef0e2 is backed up outside Kubernetes
     as build-support/cache/sonic-slave-trixie-727c90ef0e2.tar.gz (3.4 GiB),
     with SHA-256 and image metadata alongside it.
@@ -79,11 +90,14 @@ Validation completed:
     a terminal. Interactive Tcl tests report 114 passed, 2 expected skips, zero
     failed files. Without a terminal, the upstream runner reports Tcl file errors
     while returning success; do not count that initial run as passing validation.
+  SONiC YANG models: all 995 tests passed, wheel built. SWSS common and its Python
+    bindings also build through the normal SONiC dependency graph.
   Changed Python (31 files) and JSON (5 files) parse successfully.
   Kubernetes manifests pass client validation; shell entrypoints pass bash -n.
 
 Outstanding at this checkpoint:
-  Exact SONiC 6.12.41 kernel build, host-services wheel/full package tests, Marvell image build,
+  Exact-ABI Celestica packaging, host-services wheel/full package tests, SWSS package,
+    Marvell image build,
     boot/hardware validation, Broadcom and Mellanox image validation.
   Review the inherited eventd proxy-test disablement (old issue #20494); it remains
     in the fork patch stack pending an actual eventd test run.
