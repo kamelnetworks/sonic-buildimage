@@ -49,6 +49,9 @@ Adaptations after replay:
     controls per-package parallelism rather than silently reverting to config.user.
   Build-hook packaging explicitly clears inherited setgid on its DEBIAN directory;
     chmod 0775 preserves that bit on shared PVC directories and dpkg-deb rejects it.
+  Native-daemon builds unmask container system paths so libnl namespace tests can
+    mount a fresh read-only sysfs. The Kubernetes helper allocates a Docker terminal
+    through SONIC_BUILDER_EXTRA_CMDLINE for libyang's interactive Tcl tests.
 
 Validation completed:
   Ubuntu 22.04 pod on Talos 6.18.54, Docker 29.1.3, overlay2 on XFS.
@@ -70,6 +73,12 @@ Validation completed:
   Restoring that archive into the persistent builder took 4 minutes 25 seconds.
     This measures toolchain restoration only, not an incremental image build.
   Configure on the persistent workspace passes after fixing setgid permissions.
+  Libnl3 builds with its complete two-entry test suite passing; the namespace
+    executable's 29 checks also pass with system-path masking removed.
+  Libyang3 builds, and its full CTest suite passes all 63 entries when rerun with
+    a terminal. Interactive Tcl tests report 114 passed, 2 expected skips, zero
+    failed files. Without a terminal, the upstream runner reports Tcl file errors
+    while returning success; do not count that initial run as passing validation.
   Changed Python (31 files) and JSON (5 files) parse successfully.
   Kubernetes manifests pass client validation; shell entrypoints pass bash -n.
 
