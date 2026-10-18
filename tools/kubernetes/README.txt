@@ -45,7 +45,8 @@ Validate any required Bookworm images separately before treating a full hardware
 image as release-ready. Tests remain enabled. INCLUDE_FIPS=n preserves the existing Kamel CI policy
 using conventional cryptography packages. SONIC_CONFIG_BUILD_JOBS controls
 concurrent packages; SONIC_CONFIG_MAKE_JOBS controls concurrency within each package.
-The initial 4 x 2 setting avoids multiplying unrestricted nproc values.
+The initial 2 x 4 setting gives large packages four compiler jobs while keeping
+total compilation concurrency within the pod's eight-CPU limit.
 
 The script uses SONIC_CONFIG_USE_NATIVE_DOCKERD_FOR_BUILD=y so slave builds use
 the pod daemon rather than starting another nested daemon. The Docker socket
