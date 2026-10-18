@@ -51,12 +51,16 @@ Validation completed:
     6.12.113+deb13-amd64 headers: exit 0. All nine Silverstone .ko files and the
     sonic_platform Python wheel are packaged. This is an API compatibility check;
     these diagnostic packages are NOT release artifacts for SONiC 6.12.41.
+  Focused host-services ACL suite: 70 passed, using real compiled SWSS common
+    C++/Python bindings with YANG modules disabled. Five namespace-connector
+    regressions were fixed by using the function argument; one upstream test
+    received its missing fake-filesystem fixture.
   Kernel configuration unit tests pass.
   Changed Python (31 files) and JSON (5 files) parse successfully.
   Kubernetes manifests pass client validation; shell entrypoints pass bash -n.
 
 Outstanding at this checkpoint:
-  Exact SONiC 6.12.41 kernel build, host-services package/tests, Marvell image build,
+  Exact SONiC 6.12.41 kernel build, host-services wheel/full package tests, Marvell image build,
     boot/hardware validation, Broadcom and Mellanox image validation.
   Review the inherited eventd proxy-test disablement (old issue #20494); it remains
     in the fork patch stack pending an actual eventd test run.
