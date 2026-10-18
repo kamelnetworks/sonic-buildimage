@@ -1,0 +1,82 @@
+Migration checkpoint, 2026-10-18
+
+Target: upstream sonic-net/sonic-buildimage master
+  8ef49ca84e5036d5bb9f82350b46f20d70c19bc7
+Source: kamelnetworks/sonic-buildimage 202411
+  da59f7734b630ef6706fb88beddce94f731c43d3
+Kamel patch-stack boundary:
+  c3bd9e0ea (the upstream 202411 parent before the 31 fork commits)
+Work branch in all modified repositories: kamel/202611-master
+Original branches and upstream refs are preserved.
+
+Components:
+  sonic-linux-kernel: rebased on 973dfa31f3aa4600a6a65af66b46ea5e3b6c1546
+    Preserve the production no-debug-info optimization with Debian 13 configuration.
+    Debug selection is explicitly exported from rules/linux-kernel.mk.
+    Tests cover amd64/arm64/armhf, debug selection, idempotence and secure boot config.
+  sonic-host-services: rebased on d3f35e3c72212d5b53a2a12dbf50f4ab327f0ce4
+    Replay all nine Kamel test/ACL commits. Preserve upstream REDFISH service and
+    the fork's BGP/METRICS services when resolving the service-list conflict.
+  sonic-swss: use upstream's pinned b8a9b65494c234ac33b6cf0a2b7f13fb291cee7f.
+    Current upstream already implements the fork's port-status, VXLAN TTL and
+    externally learned NOARP neighbor behavior. Do not replay the old patch onto
+    NUD_PROBE: Git applies part of that patch to the wrong state check.
+  Broadcom SDK: preserve upstream b9b38791bc5fd81f846789677ca873345fbf2048.
+    Retain fork bcmgenl packaging for the in-tree legacy-th SDK, with the current
+    kernel ABI. The new SDK submodule already packages its own bcmgenl module.
+
+Removed obsolete fork changes:
+  Interface MAC-address YANG additions: present upstream.
+  Unified VXLAN FRR config and admin_status handling: present upstream.
+  sFlow jumbo receive buffers: 16384 bytes in host-sflow v2.1.26-1 already.
+  Bookworm-only cleanup and gbsyncd downgrade: superseded by Trixie.
+  Old Celestica kernel dependency bump: superseded by Linux 6.12.41 ABI.
+  Old Marvell SAI T5.0.3 and frozen 202411 package versions: retain master versions.
+  Old libyang2 leaf-list workaround: current master uses libyang3 3.12.2.
+    Revalidate route-map tests before release; retain upstream grouping semantics.
+
+Adaptations after replay:
+  Remove duplicate advertise-svi-ip registration; preserve EVPN flooding template.
+  Accton AS5712 PDDF package skips removed kernel-driver and utils directories.
+  Silverstone platform/I2C callback signatures, class_create and mux APIs ported
+    to Linux 6.12. Debian packaging stops at the first error and declares Python
+    wheel build dependencies. Both Celestica packages depend on current kernel ABI.
+  Kamel Azure pipeline repository refs now name master.
+
+Validation completed:
+  Ubuntu 22.04 pod on Talos 6.18.54, Docker 29.1.3, overlay2 on XFS.
+  Nested privileged Docker run succeeds without a VM or host socket mount.
+  Correct Docker bridge MTU from 1500 to pod MTU 1450: apt downloads then progress.
+  Full dpkg-buildpackage for Midstone and Silverstone against Debian's
+    6.12.113+deb13-amd64 headers: exit 0. All nine Silverstone .ko files and the
+    sonic_platform Python wheel are packaged. This is an API compatibility check;
+    these diagnostic packages are NOT release artifacts for SONiC 6.12.41.
+  Kernel configuration unit tests pass.
+  Changed Python (31 files) and JSON (5 files) parse successfully.
+  Kubernetes manifests pass client validation; shell entrypoints pass bash -n.
+
+Outstanding at this checkpoint:
+  Exact SONiC 6.12.41 kernel build, host-services package/tests, Marvell image build,
+    boot/hardware validation, Broadcom and Mellanox image validation.
+  Compare cold and incremental build timings after a successful full image.
+  Publish component commits before publishing a normally recursive-clonable root
+    migration branch. Local bundles can seed the component objects until then.
+
+Cluster storage:
+  Namespace sonic-build, PVC sonic-work: 500 GiB, tera-compressed.
+  PVC is Bound and attaches on k8s-4, but CSI mount repeatedly times out while
+    multipathd queries time out. No shared CSI service was restarted or changed.
+  Temporary sonic-preflight on k8s-4: 70 GiB emptyDir for compatibility checks.
+  Temporary sonic-image-builder on k8s-1: 150 GiB emptyDir for continued builds.
+  Temporary workspaces disappear when their pods are deleted. Export logs/artifacts.
+
+Bundles, relative to this workspace's parent directory:
+  build-support/sonic-buildimage.bundle
+  build-support/sonic-linux-kernel.bundle
+  build-support/sonic-host-services.bundle
+They are incremental bundles requiring the recorded upstream base commits.
+Import with tools/kubernetes/seed-bundles.sh from an upstream clone.
+Local component clones are in ../components, and validation logs in
+../build-support/validation. The upstream comparison is the useful patch review:
+  git diff upstream/master..kamel/202611-master
+The fork's old master is years behind; its PR comparison includes upstream history.
