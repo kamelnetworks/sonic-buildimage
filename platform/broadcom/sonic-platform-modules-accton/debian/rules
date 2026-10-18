@@ -37,7 +37,7 @@ CONF_DIR := conf
 
 override_dh_auto_clean:
 	(set -e; for mod in $(MODULE_DIRS); do \
-		$(MAKE) clean -C $(KERNEL_SRC)/build M=$(MOD_SRC_DIR)/$${mod}/modules; \
+		if [ -d $(MOD_SRC_DIR)/$${mod}/modules ]; then $(MAKE) clean -C $(KERNEL_SRC)/build M=$(MOD_SRC_DIR)/$${mod}/modules; fi; \
 		if [ -f $(MOD_SRC_DIR)/$${mod}/setup.py ]; then \
 			PYBUILD_NAME=$${mod} pybuild --clean -d $${mod}; \
 		fi; \
@@ -53,7 +53,7 @@ override_dh_auto_configure:
 
 override_dh_auto_build:
 	(set -e; for mod in $(MODULE_DIRS); do \
-		$(MAKE) $(MAKE_FLAGS) -C $(KERNEL_SRC)/build M=$(MOD_SRC_DIR)/$${mod}/modules modules; \
+		if [ -d $(MOD_SRC_DIR)/$${mod}/modules ]; then $(MAKE) $(MAKE_FLAGS) -C $(KERNEL_SRC)/build M=$(MOD_SRC_DIR)/$${mod}/modules modules; fi; \
 		if [ -f $(MOD_SRC_DIR)/$${mod}/setup.py ]; then \
 			PYBUILD_NAME=$${mod} pybuild --build -d $${mod}; \
 		fi; \
@@ -78,9 +78,9 @@ override_dh_auto_test:
 
 override_dh_auto_install:
 	(set -e; for mod in $(MODULE_DIRS); do \
-		$(MAKE) -C $(KERNEL_SRC)/build M=$(MOD_SRC_DIR)/$${mod}/modules INSTALL_MOD_PATH=$(MOD_SRC_DIR)/debian/$(PACKAGE_PRE_NAME)-$${mod}  modules_install; \
+		if [ -d $(MOD_SRC_DIR)/$${mod}/modules ]; then $(MAKE) -C $(KERNEL_SRC)/build M=$(MOD_SRC_DIR)/$${mod}/modules INSTALL_MOD_PATH=$(MOD_SRC_DIR)/debian/$(PACKAGE_PRE_NAME)-$${mod} modules_install; fi; \
 		dh_installdirs -p$(PACKAGE_PRE_NAME)-$${mod} usr/local/bin; \
-		cp $(MOD_SRC_DIR)/$${mod}/$(UTILS_DIR)/* debian/$(PACKAGE_PRE_NAME)-$${mod}/usr/local/bin/; \
+		if [ -d $(MOD_SRC_DIR)/$${mod}/$(UTILS_DIR) ]; then cp $(MOD_SRC_DIR)/$${mod}/$(UTILS_DIR)/* debian/$(PACKAGE_PRE_NAME)-$${mod}/usr/local/bin/; fi; \
 		dh_installdirs -p$(PACKAGE_PRE_NAME)-$${mod} lib/systemd/system; \
 		cp $(MOD_SRC_DIR)/$${mod}/$(SERVICE_DIR)/*.service debian/$(PACKAGE_PRE_NAME)-$${mod}/lib/systemd/system/; \
 		if [ -d $(MOD_SRC_DIR)/$${mod}/$(UDEV_DIR) ]; then \

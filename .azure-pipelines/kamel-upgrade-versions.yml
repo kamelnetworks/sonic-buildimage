@@ -6,7 +6,7 @@ resources:
     type: github
     name: kamelnetworks/sonic-buildimage
     endpoint: github
-    ref: 202411
+    ref: master
 
 trigger: none
 pr: none
