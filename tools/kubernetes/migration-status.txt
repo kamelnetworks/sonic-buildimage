@@ -60,7 +60,11 @@ Validation completed:
     C++/Python bindings with YANG modules disabled. Five namespace-connector
     regressions were fixed by using the function argument; one upstream test
     received its missing fake-filesystem fixture.
-  Kernel configuration unit tests pass.
+  Kernel configuration unit tests pass. The real 6.12.41 generated .config also
+    confirms CONFIG_DEBUG_INFO_NONE=y and disabled DWARF variants.
+  Completed non-FIPS slave image 727c90ef0e2 is backed up outside Kubernetes
+    as build-support/cache/sonic-slave-trixie-727c90ef0e2.tar.gz (3.4 GiB),
+    with SHA-256 and image metadata alongside it.
   Changed Python (31 files) and JSON (5 files) parse successfully.
   Kubernetes manifests pass client validation; shell entrypoints pass bash -n.
 
