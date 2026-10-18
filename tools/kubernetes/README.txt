@@ -22,10 +22,13 @@ large transfers inside nested containers can stall. The daemon reads that value
 at startup. Keep overlay2 on a filesystem supporting d_type (the tested temporary
 workspace is XFS); do not put /var/lib/docker on overlayfs or NFS.
 
-Stage source at /work/src/sonic-buildimage, owned by UID 1000. Before the component
-branches are published, seed their Git objects from the supplied migration bundles
-before running submodule update; see migration-status.txt for commits and bundles.
-After publication, a recursive clone of the migration branch is sufficient.
+Stage source at /work/src/sonic-buildimage, owned by UID 1000:
+  git clone --recurse-submodules --branch kamel/202611-master \
+    https://github.com/kamelnetworks/sonic-buildimage.git /work/src/sonic-buildimage
+
+The three modified component branches are published in their Kamel forks. The
+supplied migration bundles provide an alternative way to seed their Git objects;
+see migration-status.txt for commits and bundles.
 
 Run:
   kubectl exec -n sonic-build sonic-builder -- sudo -u builder bash -lc \

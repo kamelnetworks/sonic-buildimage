@@ -74,8 +74,7 @@ Outstanding at this checkpoint:
   Review the inherited eventd proxy-test disablement (old issue #20494); it remains
     in the fork patch stack pending an actual eventd test run.
   Compare cold and incremental build timings after a successful full image.
-  Publish component commits before publishing a normally recursive-clonable root
-    migration branch. Local bundles can seed the component objects until then.
+  Continue exact-ABI component validation on the published migration branches.
 
 Cluster storage:
   Namespace sonic-build, PVC sonic-work: 500 GiB, tera-compressed.
@@ -96,6 +95,11 @@ Local component clones are in ../components, and validation logs in
 ../build-support/validation. The upstream comparison is the useful patch review:
   git diff upstream/master..kamel/202611-master
 The fork's old master is years behind; its PR comparison includes upstream history.
+
+Publication:
+  All three modified component branches are published in their Kamel forks as
+  kamel/202611-master; the root migration branch pins these published commits.
+  Existing master and release branches have not been rewritten.
 
 Runtime interruption:
   At 2026-10-18 21:38:19 UTC Kubernetes terminated sonic-preflight in response
