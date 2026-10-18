@@ -55,7 +55,15 @@ traffic behind the correctly sized Docker bridge.
 The default SONiC slave image build deliberately uses --no-cache. For iterative
 local work, append DOCKER_NO_CACHE_FLAG= to the script invocation to reuse Docker
 layers; use a fresh build for release validation. Debian artifact caches are keyed
-by SONiC build dependencies and persist in /work/cache. A cold build is not evidence
+by SONiC build dependencies and persist in /work/cache.
+
+To restore the saved toolchain into a new pod before configuring the source:
+  gzip -dc ../build-support/cache/sonic-slave-trixie-727c90ef0e2.tar.gz | \
+    kubectl exec -i -n sonic-build sonic-builder -- docker load
+
+The archive checksum and image ID are saved alongside it. It is a build environment
+image, not a switch installer. Make verifies the computed slave tag and reuses the
+loaded image only while the Dockerfile and pinned inputs match. A cold build is not evidence
 of an incremental build speedup; measure both after the first successful image.
 
 preflight.yaml provides a separate temporary 70 GiB workspace to diagnose runtime
