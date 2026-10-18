@@ -54,7 +54,7 @@ stages:
       value: /kamelnetworks/
     - name: REGISTRY_SERVER
       value: quay.io
-    - name: ENABLE_FIPS_FEATURE  # Disable custom FIPS packages, use conventional ones
+    - name: INCLUDE_FIPS  # Disable custom FIPS packages, use conventional ones
       value: n
     - name: QUIET
       value: n

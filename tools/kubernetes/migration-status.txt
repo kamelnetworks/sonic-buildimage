@@ -82,3 +82,11 @@ Local component clones are in ../components, and validation logs in
 ../build-support/validation. The upstream comparison is the useful patch review:
   git diff upstream/master..kamel/202611-master
 The fork's old master is years behind; its PR comparison includes upstream history.
+
+Runtime interruption:
+  At 2026-10-18 21:38:19 UTC Kubernetes terminated sonic-preflight in response
+  to imminent k8s-4 node shutdown (exit 137). Pending ACL tests and slave-image
+  transfer were interrupted. Source had already been copied to sonic-image-builder
+  on k8s-1. The successful Silverstone compile log and kernel config tests are
+  preserved locally in build-support/validation. Cold toolchain setup and focused
+  ACL validation were restarted on k8s-1; check /work/logs there for live status.
