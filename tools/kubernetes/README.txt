@@ -42,7 +42,8 @@ Component example (run inside the pod as builder):
 
 Bookworm build passes are disabled for this initial Trixie component validation.
 Validate any required Bookworm images separately before treating a full hardware
-image as release-ready. Tests remain enabled. SONIC_CONFIG_BUILD_JOBS controls
+image as release-ready. Tests remain enabled. INCLUDE_FIPS=n preserves the existing Kamel CI policy
+using conventional cryptography packages. SONIC_CONFIG_BUILD_JOBS controls
 concurrent packages; SONIC_CONFIG_MAKE_JOBS controls concurrency within each package.
 The initial 4 x 2 setting avoids multiplying unrestricted nproc values.
 

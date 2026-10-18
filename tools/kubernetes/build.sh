@@ -14,6 +14,7 @@ mkdir -p /work/logs /work/cache
 if [[ ! -e rules/config.user ]]; then
     cat > rules/config.user <<'CONFIG'
 DEFAULT_CONTAINER_REGISTRY = docker.io
+INCLUDE_FIPS = n
 SONIC_CONFIG_USE_NATIVE_DOCKERD_FOR_BUILD = y
 SONIC_CONFIG_BUILD_JOBS = 4
 SONIC_CONFIG_MAKE_JOBS = 2
