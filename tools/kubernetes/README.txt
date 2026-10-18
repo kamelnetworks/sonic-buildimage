@@ -56,7 +56,7 @@ the pod daemon rather than starting another nested daemon. The Docker socket
 shared with the slave belongs only to this pod. This also keeps all build network
 traffic behind the correctly sized Docker bridge.
 
-The helper enables SONIC_BUILD_CONTAINER_TTY=y. Docker allocates a terminal even
+The helper adds --tty through SONIC_BUILDER_EXTRA_CMDLINE. Docker allocates a terminal even
 when the outer job runs headlessly, so libyang's Expect-based interactive tests
 can run correctly. Without it, Tcl reports closed-stdout errors but its test-file
 runner can still return success. Native builds also unmask container system paths

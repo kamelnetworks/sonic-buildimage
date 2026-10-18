@@ -464,10 +464,6 @@ DOCKER_RUN := docker run --rm=true $(DOCKER_PRIVMODE) --init \
     $(SONIC_BUILDER_EXTRA_CMDLINE)
 
 export PASSWORD
-ifeq ($(SONIC_BUILD_CONTAINER_TTY),y)
-    DOCKER_RUN += --tty
-endif
-
 DOCKER_RUN += -e PASSWORD
 
 # Mount the $(DOCKER_ROOT) to /var/lib/docker in the slave container, the overlay fs is not supported as dockerd root folder.
