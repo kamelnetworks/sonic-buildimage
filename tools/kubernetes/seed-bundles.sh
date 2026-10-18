@@ -11,7 +11,7 @@ if git show-ref --verify --quiet refs/heads/kamel/202611-master; then
 else
     git switch -c kamel/202611-master FETCH_HEAD
 fi
-for component in sonic-linux-kernel sonic-host-services; do
+for component in sonic-linux-kernel sonic-host-services sonic-swss; do
     if ! git -C "src/$component" rev-parse --show-prefix >/dev/null 2>&1 || [[ ! -e src/$component/.git ]]; then
         git clone --filter=blob:none "https://github.com/sonic-net/$component" "src/$component"
     fi

@@ -17,9 +17,10 @@ Components:
   sonic-host-services: rebased on d3f35e3c72212d5b53a2a12dbf50f4ab327f0ce4
     Replay all nine Kamel test/ACL commits. Preserve upstream REDFISH service and
     the fork's BGP/METRICS services when resolving the service-list conflict.
-  sonic-swss: use upstream's pinned b8a9b65494c234ac33b6cf0a2b7f13fb291cee7f.
-    Current upstream already implements the fork's port-status, VXLAN TTL and
-    externally learned NOARP neighbor behavior. Do not replay the old patch onto
+  sonic-swss: rebase on upstream pin b8a9b65494c234ac33b6cf0a2b7f13fb291cee7f.
+    Preserve Kamel default encapsulation TTL 64 (master defaults to 255) and update
+    the three default-TTL DVS assertions. Upstream covers the port-status and
+    externally learned NOARP fixes. Do not replay the old neighbor patch onto
     NUD_PROBE: Git applies part of that patch to the wrong state check.
   Broadcom SDK: preserve upstream b9b38791bc5fd81f846789677ca873345fbf2048.
     Retain fork bcmgenl packaging for the in-tree legacy-th SDK, with the current
@@ -84,6 +85,7 @@ Bundles, relative to this workspace's parent directory:
   build-support/sonic-buildimage.bundle
   build-support/sonic-linux-kernel.bundle
   build-support/sonic-host-services.bundle
+  build-support/sonic-swss.bundle
 They are incremental bundles requiring the recorded upstream base commits.
 Import with tools/kubernetes/seed-bundles.sh from an upstream clone.
 Local component clones are in ../components, and validation logs in
