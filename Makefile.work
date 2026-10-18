@@ -449,7 +449,7 @@ else
 DOCKER_PRIVMODE := --privileged
 endif
 
-DOCKER_RUN := docker run --rm=true $(DOCKER_PRIVMODE) --init --ulimit nofile=262144:262144 \
+DOCKER_RUN := docker run --rm=true $(DOCKER_PRIVMODE) --init \
     -v $(DOCKER_BUILDER_MOUNT) \
     $(GIT_WORKTREE_MOUNTS) \
     -v "$(DOCKER_LOCKDIR):$(DOCKER_LOCKDIR)" \

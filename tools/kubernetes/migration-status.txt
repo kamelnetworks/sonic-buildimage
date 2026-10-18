@@ -29,6 +29,8 @@ Removed obsolete fork changes:
   Interface MAC-address YANG additions: present upstream.
   Unified VXLAN FRR config and admin_status handling: present upstream.
   sFlow jumbo receive buffers: 16384 bytes in host-sflow v2.1.26-1 already.
+  Genesis file-descriptor speed patch: master already supplies a bounded nofile
+    limit later in the Docker command; the fork duplicate was overridden.
   Bookworm-only cleanup and gbsyncd downgrade: superseded by Trixie.
   Old Celestica kernel dependency bump: superseded by Linux 6.12.41 ABI.
   Old Marvell SAI T5.0.3 and frozen 202411 package versions: retain master versions.
