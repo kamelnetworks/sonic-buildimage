@@ -896,9 +896,9 @@ static struct attribute_group optoe_attr_group = {
 	.attrs = optoe_attrs,
 };
 
-static int optoe_probe(struct i2c_client *client,
-			const struct i2c_device_id *id)
+static int optoe_probe(struct i2c_client *client)
 {
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	int err;
 	int use_smbus = 0;
 	struct optoe_platform_data chip;

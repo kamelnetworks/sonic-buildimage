@@ -480,8 +480,7 @@ static struct device * cloverstone_dp_sff_init(struct device *dev, int portid) {
 }
 
 
-static int switchboard_probe(struct i2c_client *client, 
-               const struct i2c_device_id *id)
+static int switchboard_probe(struct i2c_client *client)
 {
     int err, ret = 0;
     struct device *dev;
@@ -515,7 +514,7 @@ static int switchboard_probe(struct i2c_client *client,
     }
 
     if (class == NULL){
-        class = class_create(THIS_MODULE, "SFF");
+        class = class_create("SFF");
         data->class = class;
         if (IS_ERR(data->class)) {
             printk(KERN_ALERT "Failed to register device class\n");

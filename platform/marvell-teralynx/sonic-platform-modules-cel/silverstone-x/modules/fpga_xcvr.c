@@ -281,11 +281,11 @@ err_exit:
 }
 
 
-static int cls_xcvr_remove(struct platform_device *pdev)
+static void cls_xcvr_remove(struct platform_device *pdev)
 {
 	struct xcvr_priv *xcvr = dev_get_drvdata(&pdev->dev);
 	xcvr_cleanup(xcvr);
-	return 0;
+	return;
 }
 
 static struct platform_driver cls_xcvr_driver = {

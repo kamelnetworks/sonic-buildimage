@@ -1164,7 +1164,7 @@ err_clk_dis:
 	return ret;
 }
 
-static int xiic_i2c_remove(struct platform_device *pdev)
+static void xiic_i2c_remove(struct platform_device *pdev)
 {
 	struct xiic_i2c *i2c = platform_get_drvdata(pdev);
 	int ret;
@@ -1174,7 +1174,7 @@ static int xiic_i2c_remove(struct platform_device *pdev)
 
 	ret = pm_runtime_get_sync(i2c->dev);
 	if (ret < 0)
-		return ret;
+		return;
 
 	xiic_deinit(i2c);
 	pm_runtime_put_sync(i2c->dev);
@@ -1183,7 +1183,7 @@ static int xiic_i2c_remove(struct platform_device *pdev)
 	pm_runtime_set_suspended(&pdev->dev);
 	pm_runtime_dont_use_autosuspend(&pdev->dev);
 
-	return 0;
+	return;
 }
 
 #if defined(CONFIG_OF)

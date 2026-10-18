@@ -213,15 +213,15 @@ static int pca954x_deselect_mux(struct i2c_mux_core *muxc, u32 chan)
 /*
  * I2C init/probing/exit functions
  */
-static int pca954x_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int pca954x_probe(struct i2c_client *client)
 {
+	const struct i2c_device_id *id = i2c_client_get_device_id(client);
 	struct i2c_adapter *adap = to_i2c_adapter(client->dev.parent);
 	struct pca954x_platform_data *pdata = dev_get_platdata(&client->dev);
 	struct device_node *of_node = client->dev.of_node;
 	bool idle_disconnect_dt;
 	struct gpio_desc *gpio;
-	int num, force, class;
+	int num, force;
 	struct i2c_mux_core *muxc;
 	struct pca954x *data;
 	const struct of_device_id *match;
@@ -270,12 +270,10 @@ static int pca954x_probe(struct i2c_client *client,
 		bool idle_disconnect_pd = false;
 
 		force = 0;			  /* dynamic adap number */
-		class = 0;			  /* no class by default */
 		if (pdata) {
 			if (num < pdata->num_modes) {
 				/* force static number */
 				force = pdata->modes[num].adap_id;
-				class = pdata->modes[num].class;
 			} else
 				/* discard unconfigured channels */
 				break;
@@ -284,7 +282,7 @@ static int pca954x_probe(struct i2c_client *client,
 		data->deselect |= (idle_disconnect_pd ||
 				   idle_disconnect_dt || force_deselect_on_exit) << num;
 
-		ret = i2c_mux_add_adapter(muxc, force, num, class);
+		ret = i2c_mux_add_adapter(muxc, force, num);
 
 		if (ret) {
 			dev_err(&client->dev,
