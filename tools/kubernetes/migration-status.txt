@@ -44,6 +44,8 @@ Adaptations after replay:
     to Linux 6.12. Debian packaging stops at the first error and declares Python
     wheel build dependencies. Both Celestica packages depend on current kernel ABI.
   Kamel Azure pipeline repository refs now name master.
+  Forward SONIC_CONFIG_MAKE_JOBS into the slave command, so a CLI override
+    controls per-package parallelism rather than silently reverting to config.user.
 
 Validation completed:
   Ubuntu 22.04 pod on Talos 6.18.54, Docker 29.1.3, overlay2 on XFS.
