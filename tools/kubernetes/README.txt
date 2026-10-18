@@ -22,6 +22,12 @@ large transfers inside nested containers can stall. The daemon reads that value
 at startup. Keep overlay2 on a filesystem supporting d_type (the tested temporary
 workspace is XFS); do not put /var/lib/docker on overlayfs or NFS.
 
+The manifests require the unified cgroup v2 hierarchy to be visible in the
+privileged pod. Docker's cgroup parent is set to the Kubernetes pod cgroup so
+nested build containers inherit its aggregate CPU and memory limits. Otherwise
+Docker can create siblings outside the pod and escape those aggregate limits.
+The bootstrap verifies the parent before starting the daemon.
+
 Stage source at /work/src/sonic-buildimage, owned by UID 1000:
   git clone --recurse-submodules --branch kamel/202611-master \
     https://github.com/kamelnetworks/sonic-buildimage.git /work/src/sonic-buildimage

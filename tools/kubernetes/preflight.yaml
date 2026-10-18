@@ -36,7 +36,10 @@ spec:
           printf 'builder ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/builder
           mkdir -p /work/src /work/logs /work/cache /var/cache/sonic/artifacts
           chown builder:builder /work/src /work/logs /work/cache /var/cache/sonic/artifacts
-          dockerd --host=unix:///var/run/docker.sock --storage-driver=overlay2 --mtu="$(cat /sys/class/net/eth0/mtu)" > /work/logs/dockerd.log 2>&1 &
+          container_cgroup=$(awk -F: '$1 == "0" {print $3}' /proc/self/cgroup)
+          pod_cgroup=${container_cgroup%/*}
+          test -n "$pod_cgroup" && test -f "/sys/fs/cgroup$pod_cgroup/cpu.max"
+          dockerd --host=unix:///var/run/docker.sock --storage-driver=overlay2 --exec-opt native.cgroupdriver=cgroupfs --cgroup-parent="$pod_cgroup" --mtu="$(cat /sys/class/net/eth0/mtu)" > /work/logs/dockerd.log 2>&1 &
           for attempt in $(seq 1 60); do
             docker info >/dev/null 2>&1 && break
             sleep 1
