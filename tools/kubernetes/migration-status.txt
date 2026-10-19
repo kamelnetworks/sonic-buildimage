@@ -53,6 +53,12 @@ Adaptations after replay:
     mount a fresh read-only sysfs. The Kubernetes helper allocates a Docker terminal
     through SONIC_BUILDER_EXTRA_CMDLINE for libyang's interactive Tcl tests, with
     --interactive=false to override the wrapper's stdin attachment in headless jobs.
+  Build-container startup repairs a dangling /usr/local/go symlink using the
+    installed /usr/bin/go toolchain root. Non-FIPS backports installed Go 1.27.2,
+    while the slave linked the FIPS Go 1.26 path. Valid links are preserved, and
+    the compiler binary is unchanged; existing C/C++ caches remain applicable.
+  Sedutil packaging clears inherited setgid on DEBIAN and allows repeat extraction.
+    Its normal package target now passes on the PVC.
   Docker's cgroup parent is the Kubernetes pod cgroup, preserving aggregate pod
     limits. The default daemon otherwise creates siblings under /docker outside
     the pod. Confirmed an explicitly placed container inherits 4 CPU / 16 GiB.

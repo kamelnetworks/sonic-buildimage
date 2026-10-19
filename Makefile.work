@@ -622,6 +622,7 @@ DOCKER_BASE_PULL = docker pull \
 			$(REGISTRY_SERVER):$(REGISTRY_PORT)$(REGISTRY_SERVER_PATH)/$(SLAVE_BASE_IMAGE):$(SLAVE_BASE_TAG)
 
 DOCKER_USER_COMMANDS = \
+	bash /sonic/scripts/repair-go-toolchain-link.sh && \
 	groupadd -f -r -g $(shell id -g) g$(USER) && \
 	useradd $(USER) -l -u $(shell id -u) -g $(shell id -g) -d /var/$(USER) -m -s /bin/bash && \
 	gpasswd -a $(USER) docker && \
