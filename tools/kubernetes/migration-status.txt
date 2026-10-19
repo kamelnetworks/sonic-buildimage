@@ -95,14 +95,21 @@ Validation completed:
   Changed Python (31 files) and JSON (5 files) parse successfully.
   Kubernetes manifests pass client validation; shell entrypoints pass bash -n.
 
+  Exact-ABI Celestica packaging passes for both Midstone and Silverstone. All nine
+    Silverstone modules report 6.12.41+deb13-sonic-amd64 vermagic; the package depends
+    on that SONiC kernel. Generated packages and build logs are saved locally.
+  Normal host-services wheel build passes all 883 tests (45.27 seconds).
+  Normal SWSS package build passes 2,409 unit tests with four skips and no failures
+    across its three suites. Package build elapsed time: 59 minutes 39 seconds.
+    These are package unit tests, not DVS or hardware validation.
+
 Outstanding at this checkpoint:
-  Exact-ABI Celestica packaging, host-services wheel/full package tests, SWSS package,
-    Marvell image build,
-    boot/hardware validation, Broadcom and Mellanox image validation.
+  Marvell image build, DVS tests, boot/hardware validation, Broadcom and Mellanox
+    image validation.
   Review the inherited eventd proxy-test disablement (old issue #20494); it remains
     in the fork patch stack pending an actual eventd test run.
   Compare cold and incremental build timings after a successful full image.
-  Continue exact-ABI component validation on the published migration branches.
+  Continue image validation on the published migration branches.
 
 Cluster storage:
   Namespace sonic-build, PVC sonic-work: 500 GiB, tera-compressed.
@@ -112,11 +119,13 @@ Cluster storage:
     read/write check passed. A recovery snapshot and verified toolchain archive
     are copied to the PVC; the live kernel-log change produced tar's only warning.
   Persistent sonic-builder now runs on k8s-1 with a separate checkout and daemon
-    for host-services and SWSS. Its cluster-specific manifest is saved outside
+    for the full Marvell image after successful host-services and SWSS builds.
+    Its cluster-specific manifest is saved outside
     the repository at build-support/persistent-builder-k8s-1.json: requests
     100m CPU / 8 GiB, limits 4 CPU / 16 GiB, two package jobs x two compiler jobs,
     SONIC_BUILD_MEMORY=12g. The larger default manifest remains available.
-  The active kernel/platform batch continues in the original temporary pod.
+  The kernel/platform batch completed in the original temporary pod. Its packages
+    and logs are exported; the kernel and platform cache entries are retained.
   Temporary sonic-preflight on k8s-4: 70 GiB emptyDir for compatibility checks.
   Temporary sonic-image-builder on k8s-1: 150 GiB emptyDir for continued builds.
   Temporary workspaces disappear when their pods are deleted. Export logs/artifacts.
