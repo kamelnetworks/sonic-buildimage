@@ -8,10 +8,12 @@ MAIN_TARGET = sedutil_$(SEDUTIL_VERSION)_$(CONFIGURED_ARCH).deb
 
 $(addprefix $(DEST)/, $(MAIN_TARGET)): $(DEST)/% :
 	wget $(SEDUTIL_GITHUB_URL)/releases/download/$(SEDUTIL_VERSION)/sedutil-cli-$(SEDUTIL_VERSION).zip
-	unzip sedutil-cli-$(SEDUTIL_VERSION).zip
+	unzip -o sedutil-cli-$(SEDUTIL_VERSION).zip
 
 	# Create debian package structure
 	mkdir -p debian-pkg/DEBIAN debian-pkg/usr/local/bin
+	# Clear setgid inherited from shared build volumes; dpkg rejects it here.
+	chmod 00755 debian-pkg/DEBIAN
 	cp sedutil-cli debian-pkg/usr/local/bin/
 	chmod 755 debian-pkg/usr/local/bin/sedutil-cli
 
