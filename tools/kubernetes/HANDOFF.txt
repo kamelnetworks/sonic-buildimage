@@ -1,0 +1,101 @@
+Handoff: 2026-10-19 20:03 UTC
+
+Objective: build the Kamel fork rebased onto upstream master for 202611.
+First target: Marvell Teralynx / Celestica Silverstone-x.
+PR: https://github.com/kamelnetworks/sonic-buildimage/pull/24
+Branch: kamel/202611-master; build source commit: 41d1fd836.
+Upstream base: 8ef49ca84e5036d5bb9f82350b46f20d70c19bc7.
+All source changes and component branches have been pushed. Existing master and
+release branches have not been rewritten or merged. This handoff is a docs-only
+commit after the source commit used by the running build.
+
+CURRENT BUILD -- LEFT RUNNING, DO NOT RESTART WITHOUT CHECKING
+Kubernetes context admin@aquinas, namespace sonic-build, pod sonic-builder,
+node k8s-1. Persistent 500 GiB PVC mounted at /work. Source checkout:
+/work/src/sonic-buildimage. Nested Docker container: dreamy_darwin,
+ID 6115fe7fd77a. Full-image attempt 4 started 2026-10-19T17:21:02Z.
+Runner /work/build-marvell-image.sh executes:
+  BLDENV=trixie make NOBOOKWORM=1 SONIC_BUILD_JOBS=2 SONIC_CONFIG_MAKE_JOBS=2 target/sonic-marvell-teralynx.bin
+Logs: /work/logs/marvell-image.log, .started, .exit, .finished.
+No .exit file at the last check; the container is confirmed running.
+At 20:02:48 UTC syncd had completed successfully (20:01:35; 56m9s).
+The graph was building docker-restapi-sidecar.gz and docker-router-advertiser.gz.
+There is NO verified complete installer yet. Root SquashFS alone is not success.
+
+Check with:
+  kubectl --context admin@aquinas -n sonic-build exec sonic-builder -- bash -c 'test ! -f /work/logs/marvell-image.exit || cat /work/logs/marvell-image.exit; tail -20 /work/logs/marvell-image.log; docker ps'
+Per-package logs are target/debs/trixie/*.deb.log and target/*.gz.log.
+Do not start a second make in this checkout/daemon. A timeout observing a build
+is not a failed build. Preserve completed caches when retrying a real failure.
+The second pod sonic-image-builder is idle; its emptyDir is not durable.
+
+RESOURCES / RUNTIME
+Ubuntu 22.04 Kubernetes pod, own nested Docker 29.1.3, overlay2; no Ubuntu VM
+or node Docker socket required. Non-FIPS build preserves Kamel policy.
+Pod limits 4 CPU / 16 GiB. CPU request increased in place from 100m to 2 CPU
+without restarting, resolving poor CPU shares under node contention.
+Running inner container memory raised from 12 to 14 GiB without restarting;
+config.user may still specify 12g for the next invocation. No OOM kills observed.
+Docker cgroup parent is the pod cgroup, enforcing aggregate pod limits.
+`kubectl top pod` undercounts nested sibling containers: inspect docker stats
+and the parent cgroup. Bridge MTU 1450; terminal --tty --interactive=false.
+Do not restart shared CSI services or touch unrelated workloads.
+
+VERIFIED RESULTS
+- Exact SONiC Linux 6.12.41 kernel, headers and kbuild: cold 1h9m. Removed header
+  restored from normal cache in 24s with matching checksums (not full-image speed).
+- Silverstone/Midstone packages built against exact SONiC ABI; all nine Silverstone
+  kernel modules have matching vermagic. No hardware boot or module load performed.
+- Host services: 883 tests pass. SWSS: 2409 pass, 4 skip. YANG models: 995 pass.
+- Libnl namespace checks and all 63 libyang CTest entries pass; terminal required
+  for meaningful interactive Tcl results.
+- Eventd normal full-build package: all 23 tests pass, including re-enabled proxy.
+- BGP configuration: 2793 tests pass. Link-manager: 190 tests pass.
+- P4 runtime: package succeeds, all 58 Bazel test targets pass; cold recipe 1h42m10s.
+- FRR, OR-Tools, DASH HA, gNMI, management-framework and syncd packages succeed.
+  Syncd compiled test sources but no runtime test summary was found: do not claim
+  its unit tests executed based solely on compilation.
+- Container images completed/cached include configuration-engine, SWSS layer,
+  database, eventd, BMP/watchdog, gNMI/sidecar/watchdog, LLDP, mux, orchagent,
+  OpenTelemetry and P4 runtime. More containers are still assembling.
+- DVS and hardware validation remain outstanding.
+
+FIXES AND RETRY NOTES
+Source changes are recorded in migration-status.txt and commit history. Recent
+integration fixes clear inherited setgid on Debian control directories, repair
+only dangling /usr/local/go aliases using installed Go, and patch management-
+framework's vendored gRPC to use standard net/http TrailerPrefix for Go 1.27.
+gNMI's newer x/net already fixes this; the extra gNMI patch was reverted.
+Do not reintroduce it. Both gNMI and framework now pass the normal full graph.
+Avoid changing the slave Dockerfile/toolchain hash mid-build: that invalidates
+all package caches. Go tidy can change go.sum and legitimately cause cache misses;
+do not bypass cache input checks. Only copy finished cache archives.
+
+NEXT STEPS
+1. Observe the existing attempt until exit. For a failure inspect the package log,
+   fix source properly, let other expensive jobs finish, then retry using caches.
+2. Require make exit 0 and target/sonic-marvell-teralynx.bin, not just rootfs/packages.
+3. Verify the installer without executing it: header payload_image_size and
+   payload_sha1 describe tar after exact exit_marker line. Check SHA-1, tar integrity,
+   nested ZIP CRCs, source/version, Silverstone platform data and kernel ABI.
+   A large DockerFS can be a separate tar member instead of inside the ZIP.
+4. Export installer, SHA-256, build logs and metadata outside the cluster; compare
+   pod/local checksums. Local home has only about 10 GiB free, so check space first.
+5. Reconcile migration-status.txt / README / PR description with final evidence.
+   Keep hardware/DVS limitations explicit. Do not merge or rewrite master silently.
+6. Optional warm full-image timing only after a correct artifact. Preserve PVC/cache.
+
+LOCAL RECOVERY MATERIAL (NOT COMMITTED BINARY ARTIFACTS)
+Workspace: /home/bluecmd/Documents/Codex/2026-10-18-your-project-is-to-lift-the
+build-support/WORK_STATE.txt: chronological checkpoints, newest entries at end.
+build-support/validation/: exported package/test logs, including P4RT's 58 passes.
+build-support/artifacts/: kernel/platform/component packages and SHA256SUMS.
+build-support/verify-installer.py: read-only checksum/tar/nested-ZIP verifier;
+validated against good/corrupt synthetic archives, not yet a real installer.
+Run large archive verification on PVC with TMPDIR=/work to conserve local space.
+build-support/*.bundle: root and three component git recovery bundles.
+/work/recovery/sonic-buildimage-latest.bundle: source through 41d1fd836.
+build-support/cache/sonic-slave-trixie-727c90ef0e2.tar.gz: 3.4 GiB toolchain backup,
+SHA256 63135cae80d177dfa64c90307336840d4f13e3421c4f8d6ebb94d7667f18f5de.
+Local persistent-builder-k8s-1.json records the 2-CPU request; don't recreate the
+live pod merely to reconcile a manifest. Preserve running build and recovery data.
