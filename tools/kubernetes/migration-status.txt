@@ -103,11 +103,15 @@ Validation completed:
     across its three suites. Package build elapsed time: 59 minutes 39 seconds.
     These are package unit tests, not DVS or hardware validation.
 
+  Removed the inherited eventd proxy-test exclusion after it passed 20 repetitions.
+    With matching SONiC libraries and Redis configured for both TCP and its Unix
+    socket, all 23 eventd, parser and event-database tests pass in an isolated pod
+    container. The first Redis-enabled diagnostic hung because its Unix socket was
+    absent; a fresh run with both endpoints configured exits successfully.
+
 Outstanding at this checkpoint:
   Marvell image build, DVS tests, boot/hardware validation, Broadcom and Mellanox
     image validation.
-  Review the inherited eventd proxy-test disablement (old issue #20494); it remains
-    in the fork patch stack pending an actual eventd test run.
   Compare cold and incremental build timings after a successful full image.
   Continue image validation on the published migration branches.
 
