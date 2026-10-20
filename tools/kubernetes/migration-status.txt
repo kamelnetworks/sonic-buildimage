@@ -1,4 +1,4 @@
-Migration checkpoint, 2026-10-19 (Europe/Stockholm)
+Migration checkpoint, 2026-10-20 (Europe/Stockholm)
 
 Target: upstream sonic-net/sonic-buildimage master
   8ef49ca84e5036d5bb9f82350b46f20d70c19bc7
@@ -115,9 +115,24 @@ Validation completed:
     container. The first Redis-enabled diagnostic hung because its Unix socket was
     absent; a fresh run with both endpoints configured exits successfully.
 
+  Full Marvell Teralynx installer: attempt 6 exits 0 on 2026-10-20, 20m13s
+    with preserved caches. Installer is 1,097,463,791 bytes; pod/local SHA-256:
+    8f648e31fad31ff9289f7c61adcae56e5de3cce4a110e7303e679cb574639807.
+    Payload SHA-1/length, outer tar, nested ZIP CRCs and DockerFS gzip/tar pass.
+    Silverstone-x platform data and all nine exact-ABI modules are included.
+    Local installer, checksums, logs and metadata: build-support/artifacts/
+    marvell-20261020 and build-support/validation in the current workspace.
+    Source is preserved checkout 41d1fd836 plus the Makefile.work limit fixes;
+    embedded version is dirty. See HANDOFF.txt for provenance and verification.
+  Slave nofile is configurable through SONIC_BUILD_NOFILE (default 1048576),
+    shared by Docker hard/soft limits and the build-user soft limit. The earlier
+    524288 cap came from Makefile.work, not Kubernetes or the node.
+    Native-daemon slaves also start with unlimited nproc for chroot Docker startup,
+    as verified and recommended through the Cluster-Janitor file handshake.
+    No host changes, extra capabilities or product startup-script changes needed.
+
 Outstanding at this checkpoint:
-  Marvell image build, DVS tests, boot/hardware validation, Broadcom and Mellanox
-    image validation.
+  DVS tests, boot/hardware validation, Broadcom and Mellanox image validation.
   Compare cold and incremental build timings after a successful full image.
   Continue image validation on the published migration branches.
 
@@ -131,9 +146,10 @@ Cluster storage:
   Persistent sonic-builder now runs on k8s-1 with a separate checkout and daemon
     for the full Marvell image after successful host-services and SWSS builds.
     Its cluster-specific manifest is saved outside
-    the repository at build-support/persistent-builder-k8s-1.json: requests
+    the repository at build-support/persistent-builder-k8s-1.json: originally requested
     100m CPU / 8 GiB, limits 4 CPU / 16 GiB, two package jobs x two compiler jobs,
-    SONIC_BUILD_MEMORY=12g. The larger default manifest remains available.
+    SONIC_BUILD_MEMORY=12g. Live CPU request is now 2 CPU; do not recreate the
+    pod to match that older saved manifest. The larger default manifest remains available.
   The kernel/platform batch completed in the original temporary pod. Its packages
     and logs are exported; the kernel and platform cache entries are retained.
   Temporary sonic-preflight on k8s-4: 70 GiB emptyDir for compatibility checks.

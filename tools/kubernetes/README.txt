@@ -62,6 +62,15 @@ the pod daemon rather than starting another nested daemon. The Docker socket
 shared with the slave belongs only to this pod. This also keeps all build network
 traffic behind the correctly sized Docker bridge.
 
+Makefile.work defaults SONIC_BUILD_NOFILE to 1048576 for both the slave's Docker
+soft/hard nofile limits and the build-user soft limit. Image assembly starts
+Docker in a chroot and requests that value; a lower slave hard limit fails there
+even when the Kubernetes pod and node already allow 1048576. Override the variable
+in rules/config.user or on the make command line when a different limit is needed.
+The slave also starts with unlimited nproc because the image's Docker startup
+requests it in the chroot. Setting it at container creation keeps native-daemon
+builds working without adding CAP_SYS_RESOURCE to the slave.
+
 The helper adds --tty --interactive=false through SONIC_BUILDER_EXTRA_CMDLINE.
 Disabling stdin attachment overrides the wrapper's default -i, allowing Docker
 to allocate a terminal when the outer job runs headlessly. Libyang's interactive tests
@@ -93,3 +102,10 @@ cluster-specific fallback when the PVC cannot mount. Check node filesystem space
 and existing requests before using it. Kubernetes may evict it under disk pressure;
 copy logs and final artifacts out promptly. The persistent manifest remains the
 preferred configuration for repeatable builds and incremental caches.
+
+Validation checkpoint (2026-10-20): the Marvell Teralynx/Silverstone-x installer
+build completes with exit 0 in the preserved sonic-builder pod. Read-only payload,
+archive, Silverstone platform and nine exact-kernel-ABI module checks pass; the
+exported installer checksum matches the pod copy. See HANDOFF.txt for artifact
+paths, checksums and source provenance. DVS, hardware boot/module loading and
+other platform images remain pending. The PR remains draft.
