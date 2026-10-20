@@ -56,7 +56,9 @@ Run as builder using bash /work/build-marvell-image.sh, which executes:
 Never start a second make in the same checkout/daemon. The sonic-image-builder
 pod remains available but its emptyDir is not durable; attempt 6 used sonic-builder.
 Toolchain: sonic-slave-trixie:727c90ef0e2; unchanged Dockerfile/toolchain hash.
-Native pod Docker daemon, overlay2, bridge MTU 1450, terminal enabled, stdin off.
+Native pod Docker daemon, overlay2, bridge MTU 1450. This run enabled the
+container terminal with stdin off; those flags do not fix recipe-level Tcl tests
+and have since been removed from the helper (see the verification note below).
 Pod limits 4 CPU / 16 GiB, request 2 CPU; rules/config.user sets slave memory 12g.
 Docker cgroup parent is the pod cgroup. No pod recreation or host-limit changes.
 
@@ -81,8 +83,16 @@ VERIFIED RESULTS
 - Silverstone/Midstone packages built against exact SONiC ABI; all nine Silverstone
   kernel modules have matching vermagic. No hardware boot or module load performed.
 - Host services: 883 tests pass. SWSS: 2409 pass, 4 skip. YANG models: 995 pass.
-- Libnl namespace checks and all 63 libyang CTest entries pass; terminal required
-  for meaningful interactive Tcl results.
+- Libnl namespace checks pass. Libyang's normal recipe reports 63 passing CTest
+  entries, but yanglint_interactive executes zero tests with 18 file-level stdout
+  errors. Package logging detaches recipes from the container terminal, so Docker
+  --tty cannot fix this. This supersedes earlier terminal-based pass claims.
+  During the Broadcom run, a separate read-only copy of the built libyang tree
+  under script -qec 'ctest -R yanglint_interactive -V' /dev/null ran 108 tests:
+  108 passed, zero failed/skipped, with one residual file-level error in add.test.
+  The residual harness error remains unexplained; do not claim all files passed.
+  Cluster-Janitor reproduced both signatures without touching the running build.
+  Evidence: build-support/validation/broadcom-image-attempt1-libyang{,-pty}.log.
 - Eventd normal full-build package: all 23 tests pass, including re-enabled proxy.
 - BGP configuration: 2793 tests pass. Link-manager: 190 tests pass.
 - P4 runtime: package succeeds, all 58 Bazel test targets pass; cold recipe 1h42m10s.

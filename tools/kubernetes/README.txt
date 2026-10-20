@@ -71,12 +71,14 @@ The slave also starts with unlimited nproc because the image's Docker startup
 requests it in the chroot. Setting it at container creation keeps native-daemon
 builds working without adding CAP_SYS_RESOURCE to the slave.
 
-The helper adds --tty --interactive=false through SONIC_BUILDER_EXTRA_CMDLINE.
-Disabling stdin attachment overrides the wrapper's default -i, allowing Docker
-to allocate a terminal when the outer job runs headlessly. Libyang's interactive tests
-can run correctly. Without it, Tcl reports closed-stdout errors but its test-file
-runner can still return success. Native builds also unmask container system paths
-so libnl's user/network namespace tests can mount a fresh read-only sysfs.
+SONiC package logging detaches recipes from the container terminal. Libyang's
+interactive Tcl suite therefore executes zero tests and reports file-level stdout
+errors even though CTest returns success. Docker --tty does not fix this. Verify
+that suite separately on a copy of the built tree under a real pseudo-terminal
+with script -qec 'ctest -R yanglint_interactive -V' /dev/null, and inspect both
+test counts and file errors. See HANDOFF.txt for the observed results.
+Native builds unmask container system paths so libnl's user/network namespace
+tests can mount a fresh read-only sysfs.
 
 The default SONiC slave image build deliberately uses --no-cache. For iterative
 local work, append DOCKER_NO_CACHE_FLAG= to the script invocation to reuse Docker

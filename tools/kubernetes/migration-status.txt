@@ -50,9 +50,9 @@ Adaptations after replay:
   Build-hook packaging explicitly clears inherited setgid on its DEBIAN directory;
     chmod 0775 preserves that bit on shared PVC directories and dpkg-deb rejects it.
   Native-daemon builds unmask container system paths so libnl namespace tests can
-    mount a fresh read-only sysfs. The Kubernetes helper allocates a Docker terminal
-    through SONIC_BUILDER_EXTRA_CMDLINE for libyang's interactive Tcl tests, with
-    --interactive=false to override the wrapper's stdin attachment in headless jobs.
+    mount a fresh read-only sysfs. Removed the ineffective Docker terminal flags:
+    package logging detaches recipes from the terminal; they cannot make libyang's
+    interactive Tcl suite execute. See the current handoff for separate pty results.
   Build-container startup repairs a dangling /usr/local/go symlink using the
     installed /usr/bin/go toolchain root. Non-FIPS backports installed Go 1.27.2,
     while the slave linked the FIPS Go 1.26 path. Valid links are preserved, and
@@ -92,10 +92,11 @@ Validation completed:
   Configure on the persistent workspace passes after fixing setgid permissions.
   Libnl3 builds with its complete two-entry test suite passing; the namespace
     executable's 29 checks also pass with system-path masking removed.
-  Libyang3 builds, and its full CTest suite passes all 63 entries when rerun with
-    a terminal. Interactive Tcl tests report 114 passed, 2 expected skips, zero
-    failed files. Without a terminal, the upstream runner reports Tcl file errors
-    while returning success; do not count that initial run as passing validation.
+  Libyang3 builds. The normal recipe reports 63 passing CTest entries, but its
+    interactive suite executes zero tests and reports 18 file-level errors.
+    This supersedes the earlier claim that Docker terminal flags fixed the suite.
+    Separate verification must use a real pty and inspect test counts/file errors;
+    see HANDOFF.txt and the Broadcom validation logs for the current result.
   SONiC YANG models: all 995 tests passed, wheel built. SWSS common and its Python
     bindings also build through the normal SONiC dependency graph.
   Changed Python (31 files) and JSON (5 files) parse successfully.
