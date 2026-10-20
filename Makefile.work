@@ -423,8 +423,10 @@ endif
 endif
 endif
 
-# Consider removing the --ulimit flag once nothing older
-# than Bullseye is being used as a slave container.
+# Image assembly raises nofile to 1048576; give the slave a matching hard
+# limit and use the same soft limit for commands run as the build user.
+SONIC_BUILD_NOFILE ?= 1048576
+
 # Build container memory limit (set SONIC_BUILD_MEMORY=none to disable).
 # Constrains OOM kills to the container instead of the kernel silently
 # killing unrelated host processes.
@@ -460,7 +462,7 @@ DOCKER_RUN := docker run --rm=true $(DOCKER_PRIVMODE) --init \
     -e "https_proxy=$(https_proxy)" \
     -e "no_proxy=$(no_proxy)" \
     -i$(shell { if [ -t 0 ]; then echo t; fi }) \
-    --ulimit nofile=524288:524288 \
+    --ulimit nofile=$(SONIC_BUILD_NOFILE):$(SONIC_BUILD_NOFILE) \
     $(SONIC_BUILDER_EXTRA_CMDLINE)
 
 export PASSWORD
@@ -837,7 +839,7 @@ endif
 
 	$(Q)$(DOCKER_RUN) \
 		$(SLAVE_BASE_IMAGE):$(SLAVE_BASE_TAG) \
-		bash -c "$(DOCKER_USER_COMMANDS) && su $(USER) -c 'ulimit -S -n 524288; export BUILD_HOSTNAME=$(shell hostname); $(SONIC_BUILD_INSTRUCTION) $@ SONIC_BUILD_TARGET=$@; $(COLLECT_BUILD_VERSION); $(SLAVE_SHELL)'"
+		bash -c "$(DOCKER_USER_COMMANDS) && su $(USER) -c 'ulimit -S -n $(SONIC_BUILD_NOFILE); export BUILD_HOSTNAME=$(shell hostname); $(SONIC_BUILD_INSTRUCTION) $@ SONIC_BUILD_TARGET=$@; $(COLLECT_BUILD_VERSION); $(SLAVE_SHELL)'"
 	$(Q)$(docker-image-cleanup)
 
 docker-cleanup:
@@ -860,7 +862,7 @@ sonic-slave-bash : sonic-slave-build
 	$(Q)$(DOCKER_RUN) -t $(SLAVE_BASE_IMAGE):$(SLAVE_BASE_TAG) bash -c "$(DOCKER_USER_COMMANDS) && su $(USER)"
 
 sonic-slave-run : sonic-slave-build
-	$(Q)$(DOCKER_RUN) $(SLAVE_BASE_IMAGE):$(SLAVE_BASE_TAG) bash -c "$(DOCKER_USER_COMMANDS) && su $(USER) -c 'ulimit -S -n 524288; $(SONIC_RUN_CMDS)'"
+	$(Q)$(DOCKER_RUN) $(SLAVE_BASE_IMAGE):$(SLAVE_BASE_TAG) bash -c "$(DOCKER_USER_COMMANDS) && su $(USER) -c 'ulimit -S -n $(SONIC_BUILD_NOFILE); $(SONIC_RUN_CMDS)'"
 
 showtag:
 	$(Q)echo $(SLAVE_BASE_IMAGE):$(SLAVE_BASE_TAG)
