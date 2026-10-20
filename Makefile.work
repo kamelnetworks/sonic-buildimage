@@ -452,6 +452,8 @@ else
 DOCKER_PRIVMODE := --privileged
 endif
 
+# The target's docker.sh also requests unlimited nproc in the image chroot.
+# Native-daemon slaves lack CAP_SYS_RESOURCE, so Docker must set it at startup.
 DOCKER_RUN := docker run --rm=true $(DOCKER_PRIVMODE) --init \
     -v $(DOCKER_BUILDER_MOUNT) \
     $(GIT_WORKTREE_MOUNTS) \
@@ -463,6 +465,7 @@ DOCKER_RUN := docker run --rm=true $(DOCKER_PRIVMODE) --init \
     -e "no_proxy=$(no_proxy)" \
     -i$(shell { if [ -t 0 ]; then echo t; fi }) \
     --ulimit nofile=$(SONIC_BUILD_NOFILE):$(SONIC_BUILD_NOFILE) \
+    --ulimit nproc=-1:-1 \
     $(SONIC_BUILDER_EXTRA_CMDLINE)
 
 export PASSWORD
