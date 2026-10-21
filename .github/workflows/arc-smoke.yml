@@ -1,0 +1,39 @@
+name: arc-smoke
+
+# Smoke test for the self-hosted Kubernetes runner (actions-runner-controller
+# scale set `sonic-buildimage`, see bluecmd/argocd-apps apps/sonic-ci). Proves
+# that a job is scheduled onto the cluster, that docker works inside the job
+# (dind sidecar), and that the SONiC build tooling prerequisites are callable.
+# It does not build SONiC.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ci/arc-smoke
+    paths:
+      - .github/workflows/arc-smoke.yml
+
+jobs:
+  smoke:
+    runs-on: sonic-buildimage
+    timeout-minutes: 15
+    steps:
+      - name: Where am I
+        run: |
+          echo "runner: $RUNNER_NAME on $(hostname)"
+          uname -a
+          nproc; free -g; df -h /home/runner/_work
+      - name: Docker via dind sidecar
+        run: |
+          docker version
+          docker run --rm alpine:3.20 sh -c 'echo "hello from a nested container on $(uname -m)"'
+      - name: Checkout (shallow, no submodules)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Build-system entry point is intact
+        run: |
+          test -f Makefile.work && test -f build_debian.sh
+          make --version | head -1
+          git rev-parse --short HEAD
