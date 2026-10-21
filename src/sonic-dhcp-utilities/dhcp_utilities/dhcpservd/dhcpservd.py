@@ -2,8 +2,10 @@
 import psutil
 import signal
 import time
+import subprocess
 import sys
 import syslog
+import os
 from .dhcp_cfggen import DhcpServCfgGenerator
 from .dhcp_lease import LeaseManager
 from dhcp_utilities.common.utils import DhcpDbConnector
@@ -14,7 +16,8 @@ from swsscommon import swsscommon
 
 KEA_DHCP4_CONFIG = "/etc/kea/kea-dhcp4.conf"
 KEA_DHCP4_PROC_NAME = "kea-dhcp4"
-KEA_LEASE_FILE_PATH = "/tmp/kea-lease.csv"
+KEA_LEASE_FILE_PATH = "/var/lib/kea/kea-lease.csv"
+DHCPSERVD_READY_FLAG = "/tmp/dhcpservd_ready"
 REDIS_SOCK_PATH = "/var/run/redis/redis.sock"
 DHCP_SERVER_IPV4_SERVER_IP = "DHCP_SERVER_IPV4_SERVER_IP"
 DHCP_SERVER_INTERFACE = "eth0"
@@ -38,9 +41,12 @@ class DhcpServd(object):
         Send SIGHUP signal to kea-dhcp4 process
         """
         for proc in psutil.process_iter():
-            if KEA_DHCP4_PROC_NAME in proc.name():
-                proc.send_signal(signal.SIGHUP)
-                break
+            try:
+                if KEA_DHCP4_PROC_NAME in proc.name():
+                    proc.send_signal(signal.SIGHUP)
+                    break
+            except psutil.NoSuchProcess:
+                continue
 
     def dump_dhcp4_config(self):
         """
@@ -58,8 +64,8 @@ class DhcpServd(object):
         self.used_options = used_options
         with open(self.kea_dhcp4_config_path, "w") as write_file:
             write_file.write(kea_dhcp4_config)
-            # After refresh kea-config, we need to SIGHUP kea-dhcp4 process to read new config
-            self._notify_kea_dhcp4_proc()
+        # After refresh kea-config, we need to SIGHUP kea-dhcp4 process to read new config
+        self._notify_kea_dhcp4_proc()
 
     def _update_dhcp_server_ip(self):
         """
@@ -75,16 +81,35 @@ class DhcpServd(object):
                                                     "ip", dhcp_server_ip)
                     return
             else:
+                syslog.syslog(syslog.LOG_WARNING, "Cannot get ip address of {}, retry in 5s".format(DHCP_SERVER_INTERFACE))
                 time.sleep(5)
-                syslog.syslog(syslog.LOG_INFO, "Cannot get ip address of {}".format(DHCP_SERVER_INTERFACE))
+        syslog.syslog(syslog.LOG_ERR, "Failed to get ip address of {} after 10 retries, exiting".format(DHCP_SERVER_INTERFACE))
         sys.exit(1)
 
     def start(self):
+        start_time = time.time()
+        syslog.syslog(syslog.LOG_INFO, "dhcpservd starting")
         self.dump_dhcp4_config()
+        syslog.syslog(syslog.LOG_INFO, "dump_dhcp4_config done, elapsed=%.3fs" % (time.time() - start_time))
         self._update_dhcp_server_ip()
+        syslog.syslog(syslog.LOG_INFO, "update_dhcp_server_ip done, elapsed=%.3fs" % (time.time() - start_time))
         self.dhcp_servd_monitor.enable_checkers(self.enabled_checker)
         lease_manager = LeaseManager(self.db_connector, KEA_LEASE_FILE_PATH)
         lease_manager.start()
+        self._signal_readiness()
+        syslog.syslog(syslog.LOG_INFO, "SIGUSR1 handler registered, ready flag written, total startup=%.3fs" % (time.time() - start_time))
+
+    def _signal_readiness(self):
+        """Write readiness flag so wait_for_dhcpservd.sh can gate kea-dhcp4 startup."""
+        try:
+            with open(DHCPSERVD_READY_FLAG, "w") as f:
+                f.write(str(os.getpid()))
+        except OSError as err:
+            syslog.syslog(
+                syslog.LOG_ERR,
+                "Failed to write readiness flag {}: {}, exiting".format(DHCPSERVD_READY_FLAG, err)
+            )
+            sys.exit(1)
 
     def wait(self):
         while True:
@@ -100,7 +125,12 @@ class DhcpServd(object):
 
 def main():
     dhcp_db_connector = DhcpDbConnector(redis_sock=REDIS_SOCK_PATH)
-    dhcp_cfg_generator = DhcpServCfgGenerator(dhcp_db_connector)
+    hook_lib_path_res = subprocess.run(["find", "/", "-name", "libdhcp_run_script.so"],
+                                       capture_output=True).stdout.decode().strip()
+    if len(hook_lib_path_res) == 0:
+        syslog.syslog(syslog.LOG_ERR, "Cannot find hook lib for kea-dhcp-server")
+        sys.exit(1)
+    dhcp_cfg_generator = DhcpServCfgGenerator(dhcp_db_connector, hook_lib_path_res.split("\n")[0])
     sel = swsscommon.Select()
     checkers = []
     checkers.append(DhcpServerTableCfgChangeEventChecker(sel, dhcp_db_connector.config_db))

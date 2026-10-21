@@ -1,4 +1,5 @@
-from unittest.mock import patch
+import time
+from unittest.mock import call, patch
 #from unittest.mock import MagicMock, patch
 
 from staticroutebfd.main import *
@@ -14,6 +15,25 @@ def constructor(mock_db, mock_producer, mock_tbl):
 
     srt_bfd = StaticRouteBfd()
     return srt_bfd
+
+
+@patch('staticroutebfd.main.swsscommon.SonicV2Connector')
+def test_reconciliation_uses_unix_socket(mock_connector):
+    dut = constructor()
+    db = mock_connector.return_value
+    db.CONFIG_DB = "CONFIG_DB"
+    db.APPL_DB = "APPL_DB"
+    db.STATE_DB = "STATE_DB"
+    db.keys.return_value = []
+
+    dut.reconciliation()
+
+    mock_connector.assert_called_once_with(use_unix_socket_path=True)
+    assert db.connect.call_args_list == [
+        call("CONFIG_DB"),
+        call("APPL_DB"),
+        call("STATE_DB"),
+    ]
 
 def set_del_test(dut, hdlr, op, args, e_bfd_dict, e_srt_dict):
     set_del_test.bfd_dict = {}
@@ -114,7 +134,7 @@ def intf_setup(dut):
         ),
         {},
         {}
-    )    
+    )
 
 def test_set_del_ipv6():
     dut = constructor()
@@ -127,7 +147,7 @@ def test_set_del_ipv6():
             "ifname": "if1, if2, if3",
             "nexthop": "2603:10E2:400:1::2,2603:10E2:400:2::2,2603:10e2:400:3::2"
         }),
-        { 
+        {
             "set_default:default:2603:10e2:400:1::2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '2603:10E2:400:1::1'},
             "set_default:default:2603:10e2:400:2::2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '2603:10E2:400:2::1'},
             "set_default:default:2603:10e2:400:3::2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '2603:10E2:400:3::1'}
@@ -171,6 +191,23 @@ def test_set_del_ipv6():
         {'del_default:2603:10e2:400::4/128': { }}
     )
 
+@patch('staticroutebfd.main.log_err')
+def test_invalid_key(mocked_log_err):
+    dut = constructor()
+    intf_setup(dut)
+
+    set_del_test(dut, "srt",
+        "SET",
+        ("2.2.2/24", {
+            "bfd": "true",
+            "nexthop": "192.168.1.2 , 192.168.2.2, 192.168.3.2",
+            "ifname": "if1, if2, if3",
+        }),
+        {},
+        {}
+    )
+    mocked_log_err.assert_called_with("invalid ip prefix for static route: '2.2.2/24'")
+
 def test_set_del():
     dut = constructor()
     intf_setup(dut)
@@ -183,7 +220,7 @@ def test_set_del():
             "nexthop": "192.168.1.2 , 192.168.2.2, 192.168.3.2",
             "ifname": "if1, if2, if3",
         }),
-        { 
+        {
             "set_default:default:192.168.1.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.1.1'},
             "set_default:default:192.168.2.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.2.1'},
             "set_default:default:192.168.3.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.3.1'}
@@ -224,7 +261,7 @@ def test_set_del():
             "nexthop": "192.168.1.2 , 192.168.2.2",
             "ifname": "if1, if2",
         }),
-        { 
+        {
             "del_default:default:192.168.3.2" : {}
         },
         {'set_default:2.2.2.0/24': {'nexthop': '192.168.2.2,192.168.1.2 ', 'ifname': 'if2,if1', 'nexthop-vrf': 'default,default', 'expiry': 'false'}}
@@ -238,7 +275,7 @@ def test_set_del():
             "nexthop": "192.168.1.2 , 192.168.2.2",
             "ifname": "if1, if2",
         }),
-        { 
+        {
             "del_default:default:192.168.1.2" : {},
             "del_default:default:192.168.2.2" : {}
         },
@@ -276,7 +313,7 @@ def test_set_del_vrf():
             "ifname": "if1, if2, if3",
             "nexthop-vrf": "testvrf1, , default",
         }),
-        { 
+        {
             "set_testvrf1:default:192.168.1.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.1.1'},
             "set_vrfred:default:192.168.2.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.2.1'},
             "set_default:default:192.168.3.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.3.1'}
@@ -317,7 +354,7 @@ def test_set_del_vrf():
             "ifname": "if1, if2",
             "nexthop-vrf": "testvrf1,",
         }),
-        { 
+        {
             "del_default:default:192.168.3.2" : {}
         },
         {'set_vrfred:2.2.2.0/24': {'nexthop': '192.168.2.2,192.168.1.2 ', 'ifname': 'if2,if1', 'nexthop-vrf': 'vrfred, testvrf1', 'expiry': 'false'}}
@@ -326,7 +363,7 @@ def test_set_del_vrf():
     set_del_test(dut, "srt",
         "DEL",
         ("vrfred|2.2.2.0/24", { }),
-        { 
+        {
             "del_testvrf1:default:192.168.1.2" : {},
             "del_vrfred:default:192.168.2.2" : {}
         },
@@ -344,7 +381,7 @@ def test_bfd_del():
             "nexthop": "192.168.1.2 , 192.168.2.2, 192.168.3.2",
             "ifname": "if1, if2, if3",
         }),
-        { 
+        {
             "set_default:default:192.168.1.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.1.1'},
             "set_default:default:192.168.2.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.2.1'},
             "set_default:default:192.168.3.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.3.1'}
@@ -397,7 +434,7 @@ def test_set_2routes():
             "nexthop": "192.168.1.2 , 192.168.2.2, 192.168.3.2",
             "ifname": "if1, if2, if3",
         }),
-        { 
+        {
             "set_default:default:192.168.1.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.1.1'},
             "set_default:default:192.168.2.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.2.1'},
             "set_default:default:192.168.3.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.3.1'}
@@ -474,7 +511,7 @@ def test_set_bfd_change_hold():
             "nexthop": "192.168.1.2 , 192.168.2.2, 192.168.3.2",
             "ifname": "if1, if2, if3",
         }),
-        { 
+        {
             "set_default:default:192.168.1.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.1.1'},
             "set_default:default:192.168.2.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.2.1'},
             "set_default:default:192.168.3.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.3.1'}
@@ -514,7 +551,7 @@ def test_set_bfd_change_hold():
             "nexthop": "192.168.1.2 , 192.168.2.2, 192.168.3.2",
             "ifname": "if1, if2, if3",
         }),
-        { 
+        {
             "del_default:default:192.168.1.2" : {},
             "del_default:default:192.168.2.2" : {},
             "del_default:default:192.168.3.2" : {}
@@ -533,7 +570,7 @@ def test_set_bfd_change_hold():
             "nexthop": "192.168.1.2 , 192.168.2.2, 192.168.3.2",
             "ifname": "if1, if2, if3",
         }),
-        { 
+        {
             "set_default:default:192.168.1.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.1.1'},
             "set_default:default:192.168.2.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.2.1'},
             "set_default:default:192.168.3.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.3.1'}
@@ -579,7 +616,7 @@ def test_set_bfd_change_no_hold():
             "nexthop": "192.168.1.2 , 192.168.2.2, 192.168.3.2",
             "ifname": "if1, if2, if3",
         }),
-        { 
+        {
             "set_default:default:192.168.1.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.1.1'},
             "set_default:default:192.168.2.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.2.1'},
             "set_default:default:192.168.3.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.3.1'}
@@ -628,7 +665,7 @@ def test_set_bfd_change_no_hold():
             "nexthop": "192.168.1.2 , 192.168.2.2, 192.168.3.2",
             "ifname": "if1, if2, if3",
         }),
-        { 
+        {
             "del_default:default:192.168.1.2" : {},
             "del_default:default:192.168.3.2" : {}
         },
@@ -637,7 +674,7 @@ def test_set_bfd_change_no_hold():
         }
     )
 
-    #test #10 change 'bfd': false to true, because the bfd session "default:default:192.168.2.2" is up, so add that nexthop right after "bfd" change to "true" 
+    #test #10 change 'bfd': false to true, because the bfd session "default:default:192.168.2.2" is up, so add that nexthop right after "bfd" change to "true"
     set_del_test(dut, "srt",
         "SET",
         ("2.2.2.0/24", {
@@ -645,7 +682,7 @@ def test_set_bfd_change_no_hold():
             "nexthop": "192.168.1.2 , 192.168.2.2, 192.168.3.2",
             "ifname": "if1, if2, if3",
         }),
-        { 
+        {
             "set_default:default:192.168.1.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.1.1'},
             "set_default:default:192.168.3.2" : {'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50', 'multiplier': '3', 'local_addr': '192.168.3.1'}
         },
@@ -678,4 +715,203 @@ def test_set_bfd_change_no_hold():
     )
 
 
+def test_set_del_blackhole_route():
+    dut = constructor()
+    intf_setup(dut)
 
+    test_set_del_blackhole_route.logs = []
+
+    with patch('staticroutebfd.main.log_info', new=lambda msg: test_set_del_blackhole_route.logs.append(msg)):
+        set_del_test(dut, "srt",
+            "SET",
+            ("2.2.2.0/24", {
+                "blackhole": "true",
+            }),
+            {},
+            {}
+        )
+
+        set_del_test(dut, "srt",
+            "DEL",
+            ("2.2.2.0/24", {
+                "blackhole": "true",
+            }),
+            {},
+            {}
+        )
+
+    assert "Blackholing static route encountered, skipping it" in test_set_del_blackhole_route.logs
+
+
+def test_set_del_ifname_only_route():
+    dut = constructor()
+    intf_setup(dut)
+
+    test_set_del_ifname_only_route.logs = []
+
+    with patch('staticroutebfd.main.log_warn', new=lambda msg: test_set_del_ifname_only_route.logs.append(msg)):
+        set_del_test(dut, "srt",
+            "SET",
+            ("2.2.2.0/24", {
+                "ifname": "if1,if2",
+            }),
+            {},
+            {}
+        )
+
+        set_del_test(dut, "srt",
+            "DEL",
+            ("2.2.2.0/24", {
+                "ifname": "if1,if2",
+            }),
+            {},
+            {}
+        )
+
+    assert "Static route bfd set Failed, nexthop, interface and vrf lists do not match or some of them is empty."\
+        in test_set_del_ifname_only_route.logs
+
+
+# ---------------------------------------------------------------------------
+# Tests for _resync_bfd_sessions() — swss/bgp start-order race recovery
+#
+# We mock _get_state_bfd_keys() directly on the dut instance. This is the
+# cleanest approach because it avoids swsscommon.Table patching which behaves
+# differently between environments where swsscommon is a real C extension vs.
+# a MagicMock (swsscommon_test.py).
+# ---------------------------------------------------------------------------
+
+def _setup_resync_dut(state_db_keys,
+                      nexthop="192.168.1.2,192.168.2.2", ifname="if1,if2",
+                      prefix="2.2.2.0/24", is_ipv6=False):
+    """
+    Build a StaticRouteBfd dut with BFD sessions from a static route,
+    mock _get_state_bfd_keys() to return state_db_keys, and return
+    (dut, reprogrammed_dict).
+    """
+    dut = constructor()
+    intf_setup(dut)
+    expected_bfd = {}
+    for i, (nh, _) in enumerate(zip(nexthop.split(","), ifname.split(","))):
+        nh = nh.strip()
+        local = ("2603:10E2:400:%d::1" % (i + 1)) if is_ipv6 else ("192.168.%d.1" % (i + 1))
+        expected_bfd["set_default:default:" + nh] = {
+            'multihop': 'false', 'rx_interval': '50', 'tx_interval': '50',
+            'multiplier': '3', 'local_addr': local,
+        }
+    set_del_test(dut, "srt", "SET",
+        (prefix, {"bfd": "true", "nexthop": nexthop, "ifname": ifname}),
+        expected_bfd, {}
+    )
+    # Mock _get_state_bfd_keys directly on the instance — no swsscommon.Table patching needed
+    dut._get_state_bfd_keys = lambda: list(state_db_keys)
+    reprogrammed = {}
+    dut.set_bfd_session_into_appl_db = lambda key, data: reprogrammed.update({key: data})
+    return dut, reprogrammed
+
+
+def test_resync_bfd_sessions_missing():
+    """
+    All static_route BFD sessions missing from STATE_DB (APPL_DB was flushed).
+    Should re-write all sessions and return False.
+    """
+    dut, reprogrammed = _setup_resync_dut([])
+    result = dut._resync_bfd_sessions()
+    assert result == False
+    assert "default:default:192.168.1.2" in reprogrammed
+    assert "default:default:192.168.2.2" in reprogrammed
+
+
+def test_resync_bfd_sessions_all_present():
+    """
+    All static_route BFD sessions present in STATE_DB.
+    Should return True and not re-write anything.
+    """
+    dut, reprogrammed = _setup_resync_dut([
+        "default|default|192.168.1.2",
+        "default|default|192.168.2.2",
+    ])
+    result = dut._resync_bfd_sessions()
+    assert result == True
+    assert len(reprogrammed) == 0
+
+
+def test_resync_bfd_sessions_partial():
+    """
+    One session present in STATE_DB, one missing.
+    Should re-write only the missing one and return False.
+    """
+    dut, reprogrammed = _setup_resync_dut(["default|default|192.168.1.2"])
+    result = dut._resync_bfd_sessions()
+    assert result == False
+    assert "default:default:192.168.1.2" not in reprogrammed
+    assert "default:default:192.168.2.2" in reprogrammed
+
+
+def test_resync_bfd_sessions_ipv6():
+    """
+    IPv6 peer addresses contain colons. Key conversion must only replace the
+    first 2 colons (vrf/intf separators), preserving the IPv6 address intact.
+    """
+    dut, reprogrammed = _setup_resync_dut(
+        [],
+        nexthop="2603:10e2:400:1::2,2603:10e2:400:2::2",
+        ifname="if1,if2",
+        prefix="2603:10e2:400::4/128",
+        is_ipv6=True,
+    )
+    result = dut._resync_bfd_sessions()
+    assert result == False
+    # IPv6 colons inside the address must be preserved (only first 2 replaced)
+    assert "default:default:2603:10e2:400:1::2" in reprogrammed
+    assert "default:default:2603:10e2:400:2::2" in reprogrammed
+
+
+def test_resync_bfd_sessions_empty_local_db():
+    """
+    No static_route BFD sessions in local_db.
+    Should return True immediately without touching STATE_DB.
+    """
+    dut = constructor()
+    called = []
+    dut._get_state_bfd_keys = lambda: called.append(1) or []
+    result = dut._resync_bfd_sessions()
+    assert result == True
+    assert len(called) == 0  # STATE_DB not queried
+
+
+def test_resync_timer_disables_after_full_recovery():
+    """
+    Once _resync_bfd_sessions() returns True (all sessions in STATE_DB),
+    the run() loop sets _next_resync_time=None to disable further checks.
+    """
+    dut, _ = _setup_resync_dut(["default|default|192.168.1.2"],
+                                nexthop="192.168.1.2", ifname="if1")
+    dut._next_resync_time = 0.0
+
+    if dut._next_resync_time is not None and time.monotonic() >= dut._next_resync_time:
+        if dut._resync_bfd_sessions():
+            dut._next_resync_time = None
+        else:
+            dut._next_resync_time = time.monotonic() + dut.RESYNC_STATE_DB_CHECK_INTERVAL
+
+    assert dut._next_resync_time is None
+
+
+def test_resync_timer_reschedules_when_sessions_missing():
+    """
+    When _resync_bfd_sessions() returns False (sessions still missing), the
+    run() loop reschedules _next_resync_time for another interval.
+    """
+    dut, _ = _setup_resync_dut([], nexthop="192.168.1.2", ifname="if1")
+    dut._next_resync_time = 0.0
+
+    before = time.monotonic()
+    if dut._next_resync_time is not None and time.monotonic() >= dut._next_resync_time:
+        if dut._resync_bfd_sessions():
+            dut._next_resync_time = None
+        else:
+            dut._next_resync_time = time.monotonic() + dut.RESYNC_STATE_DB_CHECK_INTERVAL
+
+    assert dut._next_resync_time is not None
+    assert dut._next_resync_time >= before + dut.RESYNC_STATE_DB_CHECK_INTERVAL

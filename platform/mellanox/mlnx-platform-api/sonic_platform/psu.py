@@ -1,5 +1,6 @@
 #
-# Copyright (c) 2019-2023 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: NVIDIA CORPORATION & AFFILIATES
+# Copyright (c) 2019-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,6 +25,7 @@
 
 try:
     import os
+    import subprocess
     import time
     from sonic_platform_base.psu_base import PsuBase
     from sonic_py_common.logger import Logger
@@ -39,6 +41,9 @@ except ImportError as e:
 logger = Logger()
 
 PSU_PATH = '/var/run/hw-management/'
+PLATFORM_SENSORS_CONF = '/usr/share/sonic/platform/sensors.conf'
+ETC_SENSORS_CONF = '/etc/sensors.d/sensors.conf'
+PSU_SENSORS_CONF_UPDATER = '/usr/share/sonic/platform/psu_sensors_conf_updater'
 
 
 class FixedPsu(PsuBase):
@@ -46,6 +51,7 @@ class FixedPsu(PsuBase):
         super(FixedPsu, self).__init__()
         self.index = psu_index + 1
         self._name = "PSU {}".format(self.index)
+        self.model = 'N/A'
         self.psu_oper_status = os.path.join(PSU_PATH, "thermal/psu{}_pwr_status".format(self.index))
         self._led = None
 
@@ -256,6 +262,9 @@ class Psu(FixedPsu):
         from .thermal import initialize_psu_thermal
         self._thermal_list = initialize_psu_thermal(psu_index, self.get_power_available_status)
 
+        # initialize psu model
+        self.model = self.vpd_parser.get_model()
+
     @property
     def psu_voltage(self):
         if not self._psu_voltage:
@@ -304,7 +313,35 @@ class Psu(FixedPsu):
         Returns:
             string: Model/part number of device
         """
-        return self.vpd_parser.get_model()
+        current_model = self.vpd_parser.get_model()
+        if current_model != self.model and os.path.exists(PSU_SENSORS_CONF_UPDATER):
+            # Rebuild from platform sensors.conf (source of truth), not from
+            # /etc/sensors.d/sensors.conf which may already be incomplete.
+            # Updater uses flock to serialize concurrent updates.
+            # On failure leave self.model unchanged so the next call can retry.
+            src = PLATFORM_SENSORS_CONF if os.path.isfile(PLATFORM_SENSORS_CONF) else ETC_SENSORS_CONF
+            if not os.path.isfile(src):
+                self.model = current_model
+                return current_model
+
+            try:
+                subprocess.check_call([
+                    'bash', '-c',
+                    f'source "{PSU_SENSORS_CONF_UPDATER}" && '
+                    f'update_psu_sensors_configuration "{src}" "{ETC_SENSORS_CONF}"'
+                ])
+                subprocess.check_call(['service', 'sensord', 'restart'])
+            except subprocess.CalledProcessError as ce:
+                logger.log_error(
+                    'Failed to update PSU sensors configuration, return code={}, cmd={}'.format(
+                        ce.returncode, ce.cmd))
+                return current_model
+            except Exception as e:
+                logger.log_error('Failed to update PSU sensors configuration - {}'.format(e))
+                return current_model
+
+        self.model = current_model
+        return current_model
 
     def get_serial(self):
         """
@@ -440,7 +477,8 @@ class Psu(FixedPsu):
             The thresholds of voltage are not supported on all platforms.
             So we have to check capability first.
         """
-        if self.psu_voltage_capability and self.psu_voltage_max and self.get_powergood_status():
+        if self.psu_voltage_capability and os.path.exists(self.psu_voltage_capability) and \
+           self.psu_voltage_max and os.path.exists(self.psu_voltage_max) and self.get_powergood_status():
             capability = utils.read_str_from_file(self.psu_voltage_capability)
             if 'max' in capability:
                 max_voltage = utils.read_int_from_file(self.psu_voltage_max, log_func=logger.log_info)
@@ -463,7 +501,8 @@ class Psu(FixedPsu):
             The thresholds of voltage are not supported on all platforms.
             So we have to check capability first.
         """
-        if self.psu_voltage_capability and self.psu_voltage_min and self.get_powergood_status():
+        if self.psu_voltage_capability and os.path.exists(self.psu_voltage_capability) and \
+           self.psu_voltage_min and os.path.exists(self.psu_voltage_min) and self.get_powergood_status():
             capability = utils.read_str_from_file(self.psu_voltage_capability)
             if 'min' in capability:
                 min_voltage = utils.read_int_from_file(self.psu_voltage_min, log_func=logger.log_info)

@@ -27,6 +27,9 @@
 #include <linux/jiffies.h>
 #include <linux/i2c.h>
 #include <linux/mutex.h>
+#include <linux/version.h>
+
+#define _memset(s, c, n) memset(s, c, n)
 
 /* Addresses to scan */
 static const unsigned short normal_i2c[] = { /*0x50, 0x51, 0x52, 0x53, 0x54,
@@ -102,7 +105,7 @@ static ssize_t sys_eeprom_read(struct file *filp, struct kobject *kobj,
     struct eeprom_data *data = i2c_get_clientdata(client);
     u8 slice;
 
-    if (off > EEPROM_SIZE) {
+    if (off >= EEPROM_SIZE) {
         return 0;
     }
     if (off + count > EEPROM_SIZE) {
@@ -135,7 +138,7 @@ static ssize_t sys_eeprom_write(struct file *filp, struct kobject *kobj,
 
     dev_dbg(&client->dev, "sys_eeprom_write off=%d, count=%d\n", (int)off, (int)count);
 
-    if (off > EEPROM_SIZE) {
+    if (off >= EEPROM_SIZE) {
         return 0;
     }
     if (off + count > EEPROM_SIZE) {
@@ -192,22 +195,36 @@ static int sys_eeprom_detect(struct i2c_client *client, struct i2c_board_info *i
     /* EDID EEPROMs are often 24C00 EEPROMs, which answer to all
        addresses 0x50-0x57, but we only care about 0x51 and 0x55. So decline
        attaching to addresses >= 0x56 on DDC buses */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
     if (!(adapter->class & I2C_CLASS_SPD) && client->addr >= 0x56) {
         return -ENODEV;
     }
+#else
+    if (client->addr >= 0x56) {
+        return -ENODEV;
+    }
+#endif
 
     if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_READ_BYTE)
      && !i2c_check_functionality(adapter, I2C_FUNC_SMBUS_WRITE_BYTE_DATA)) {
         return -ENODEV;
     }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 8, 0)
     strlcpy(info->type, "eeprom", I2C_NAME_SIZE);
+#else
+    strscpy(info->type, "eeprom", I2C_NAME_SIZE);
+#endif
 
     return 0;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 3, 0)
 static int sys_eeprom_probe(struct i2c_client *client,
             const struct i2c_device_id *id)
+#else
+static int sys_eeprom_probe(struct i2c_client *client)
+#endif
 {
     struct eeprom_data *data;
     int err;
@@ -220,7 +237,7 @@ static int sys_eeprom_probe(struct i2c_client *client,
 #ifdef __STDC_LIB_EXT1__
     memset_s(data->data, EEPROM_SIZE, 0xff, EEPROM_SIZE);
 #else
-    memset(data->data, 0xff, EEPROM_SIZE);
+    _memset(data->data, 0xff, EEPROM_SIZE);
 #endif
     i2c_set_clientdata(client, data);
     mutex_init(&data->update_lock);
@@ -239,12 +256,18 @@ exit:
     return err;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
 static int sys_eeprom_remove(struct i2c_client *client)
+#else
+static void sys_eeprom_remove(struct i2c_client *client)
+#endif
 {
     sysfs_remove_bin_file(&client->dev.kobj, &sys_eeprom_attr);
     kfree(i2c_get_clientdata(client));
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
     return 0;
+#endif
 }
 
 static const struct i2c_device_id sys_eeprom_id[] = {
@@ -260,7 +283,13 @@ static struct i2c_driver sys_eeprom_driver = {
     .remove     = sys_eeprom_remove,
     .id_table   = sys_eeprom_id,
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 8, 0)
     .class      = I2C_CLASS_DDC | I2C_CLASS_SPD,
+#elif LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
+    .class      = I2C_CLASS_SPD,
+#else
+    .class      = 0,
+#endif
     .detect     = sys_eeprom_detect,
     .address_list   = normal_i2c,
 };

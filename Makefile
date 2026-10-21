@@ -2,9 +2,10 @@
 
 NOJESSIE ?= 1
 NOSTRETCH ?= 1
-NOBUSTER ?= 0
-NOBULLSEYE ?= 0
+NOBUSTER ?= 1
+NOBULLSEYE ?= 1
 NOBOOKWORM ?= 0
+NOTRIXIE ?= 0
 
 override Q := @
 ifeq ($(QUIET),n)
@@ -34,10 +35,23 @@ ifeq ($(NOBOOKWORM),0)
 BUILD_BOOKWORM=1
 endif
 
+ifeq ($(NOTRIXIE),0)
+BUILD_TRIXIE=1
+endif
+
+# Bazel components only support a subset of configurations.
+# Fail fast if we're trying to build with Bazel for anything other than trixie.
+ifneq ($(filter-out bazel_disabled,$(BAZEL_MIN_READINESS)),)
+BAZEL_NON_TRIXIE_BUILDS := $(strip $(BUILD_JESSIE) $(BUILD_STRETCH) $(BUILD_BUSTER) $(BUILD_BULLSEYE) $(BUILD_BOOKWORM))
+ifneq ($(BAZEL_NON_TRIXIE_BUILDS),)
+$(error BAZEL_MIN_READINESS=$(BAZEL_MIN_READINESS) only supports trixie builds: Bazel dockers require the trixie base. Re-run with trixie only, e.g. NOJESSIE=1 NOSTRETCH=1 NOBUSTER=1 NOBULLSEYE=1 NOBOOKWORM=1 NOTRIXIE=0, or set BAZEL_MIN_READINESS=bazel_disabled.)
+endif
+endif
+
 PLATFORM_PATH := platform/$(if $(PLATFORM),$(PLATFORM),$(CONFIGURED_PLATFORM))
 PLATFORM_CHECKOUT := platform/checkout
 PLATFORM_CHECKOUT_FILE := $(PLATFORM_CHECKOUT)/$(PLATFORM).ini
-PLATFORM_CHECKOUT_CMD := $(shell if [ -f $(PLATFORM_CHECKOUT_FILE) ]; then PLATFORM_PATH=$(PLATFORM_PATH) j2 $(PLATFORM_CHECKOUT)/template.j2 $(PLATFORM_CHECKOUT_FILE); fi)
+PLATFORM_CHECKOUT_CMD := $(shell if [ -f $(PLATFORM_CHECKOUT_FILE) ]; then PLATFORM_REPO=$(PLATFORM_REPO) PLATFORM_REF=$(PLATFORM_REF) PLATFORM_PATH=$(PLATFORM_PATH) j2 $(PLATFORM_CHECKOUT)/template.j2 $(PLATFORM_CHECKOUT_FILE); fi)
 MAKE_WITH_RETRY := ./scripts/run_with_retry $(MAKE)
 
 %::
@@ -55,8 +69,12 @@ ifeq ($(NOBULLSEYE), 0)
 	$(MAKE_WITH_RETRY) EXTRA_DOCKER_TARGETS=$(notdir $@) BLDENV=bullseye -f Makefile.work bullseye
 endif
 ifeq ($(NOBOOKWORM), 0)
-	$(MAKE_WITH_RETRY) BLDENV=bookworm -f Makefile.work $@
+	$(MAKE_WITH_RETRY) EXTRA_DOCKER_TARGETS=$(notdir $@) BLDENV=bookworm -f Makefile.work bookworm
 endif
+ifeq ($(NOTRIXIE), 0)
+	$(MAKE_WITH_RETRY) BLDENV=trixie -f Makefile.work $@
+endif
+
 	BLDENV=bookworm $(MAKE) -f Makefile.work docker-cleanup
 
 jessie:
@@ -79,11 +97,17 @@ endif
 
 bullseye:
 	@echo "+++ Making $@ +++"
-ifeq ($(NOBUSTER), 0)
+ifeq ($(NOBULLSEYE), 0)
 	$(MAKE) -f Makefile.work bullseye
 endif
 
-init:
+trixie:
+	@echo "+++ Making $@ +++"
+ifeq ($(NOTRIXIE), 0)
+	$(MAKE) -f Makefile.work trixie
+endif
+
+init reset:
 	@echo "+++ Making $@ +++"
 	$(MAKE) -f Makefile.work $@
 
@@ -97,18 +121,19 @@ define make_work
 	$(if $(BUILD_BUSTER),BLDENV=buster $(MAKE) -f Makefile.work $@,)
 	$(if $(BUILD_BULLSEYE),BLDENV=bullseye $(MAKE) -f Makefile.work $@,)
 	$(if $(BUILD_BOOKWORM),BLDENV=bookworm $(MAKE) -f Makefile.work $@,)
+	$(if $(BUILD_TRIXIE),BLDENV=trixie $(MAKE) -f Makefile.work $@,)
 endef
 
 .PHONY: $(PLATFORM_PATH)
 
 $(PLATFORM_PATH):
-	@echo "+++ Cheking $@ +++"
+	@echo "+++ Checking $@ +++"
 	$(PLATFORM_CHECKOUT_CMD)
 
 configure : $(PLATFORM_PATH)
 	$(call make_work, $@)
 
-clean reset showtag docker-cleanup sonic-slave-build sonic-slave-bash :
+clean showtag docker-cleanup clean-docker sonic-slave-build sonic-slave-bash :
 	$(call make_work, $@)
 
 # Freeze the versions, see more detail options: scripts/versions_manager.py freeze -h

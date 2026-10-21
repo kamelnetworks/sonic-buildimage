@@ -10,7 +10,7 @@ except ImportError as e:
 class Psu(PddfPsu):
     """PDDF Platform-Specific PSU class"""
     
-    PLATFORM_PSU_CAPACITY = 2000
+    PLATFORM_PSU_CAPACITY = 1300
 
     def __init__(self, index, pddf_data=None, pddf_plugin_data=None):
         PddfPsu.__init__(self, index, pddf_data, pddf_plugin_data)
@@ -36,3 +36,21 @@ class Psu(PddfPsu):
 
         # power is returned in micro watts
         return round(float(self.get_voltage()*self.get_current()), 2)
+
+    def get_capacity(self):
+        """
+        Retrieves the maximum supplied power by PSU (or PSU capacity)
+        Returns:
+            A float number, the maximum power output in Watts.
+            e.g. 1200.1
+        """
+        return self.get_maximum_supplied_power()
+
+    def get_type(self):
+        """
+        Gets the type of the PSU
+
+        Returns:
+            A string, the type of PSU (AC/DC)
+        """
+        return self.plugin_data['PSU']['DEFAULT_TYPE']

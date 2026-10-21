@@ -1,6 +1,6 @@
 /*
  * Copyright 2019 Broadcom.
- * The term ��Broadcom�� refers to Broadcom Inc. and/or its subsidiaries.
+ * The term "Broadcom" refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -33,6 +33,7 @@
 #include "../../../../pddf/i2c/modules/include/pddf_client_defs.h"
 #include "../../../../pddf/i2c/modules/include/pddf_sysstatus_defs.h"
 
+#define _memset(s, c, n) memset(s, c, n)
 
 SYSSTATUS_DATA sysstatus_data = {0};
 
@@ -43,6 +44,8 @@ static ssize_t do_attr_operation(struct device *dev, struct device_attribute *da
 ssize_t show_sysstatus_data(struct device *dev, struct device_attribute *da, char *buf);
 ssize_t store_sysstatus_data(struct device *dev, struct device_attribute *da, const char *buf, size_t count);
 
+int __init sysstatus_data_init(void);
+void __exit sysstatus_data_exit(void);
 
 PDDF_DATA_ATTR(attr_name, S_IWUSR|S_IRUGO, show_pddf_data, store_pddf_data, PDDF_CHAR, 32,
              (void*)&sysstatus_data.sysstatus_addr_attr.aname, NULL);
@@ -142,8 +145,9 @@ ssize_t show_sysstatus_data(struct device *dev, struct device_attribute *da, cha
 
     if (sysstatus_addr_attrs==NULL )
     {
-        printk(KERN_DEBUG "%s is not supported attribute for this client\n",data->sysstatus_addr_attrs[i].aname);
+        printk(KERN_DEBUG "%s is not supported attribute for this client\n",attr->dev_attr.attr.name);
         status = 0;
+        return sprintf(buf, "0x%x\n", status);
     }
     else
     {
@@ -173,7 +177,7 @@ ssize_t store_sysstatus_data(struct device *dev, struct device_attribute *da, co
 
     if (sysstatus_addr_attrs==NULL)
     {
-        printk(KERN_DEBUG "%s is not supported attribute for this client\n",data->sysstatus_addr_attrs[i].aname);
+        printk(KERN_DEBUG "%s is not supported attribute for this client\n",attr->dev_attr.attr.name);
         return -EINVAL;
     }
     else
@@ -207,7 +211,7 @@ static ssize_t do_attr_operation(struct device *dev, struct device_attribute *da
 #ifdef __STDC_LIB_EXT1__
     memset_s(&pdata->sysstatus_addr_attr, sizeof(pdata->sysstatus_addr_attr, 0, sizeof(pdata->sysstatus_addr_attr));
 #else
-    memset(&pdata->sysstatus_addr_attr, 0, sizeof(pdata->sysstatus_addr_attr));
+    _memset(&pdata->sysstatus_addr_attr, 0, sizeof(pdata->sysstatus_addr_attr));
 #endif
 
     return count;

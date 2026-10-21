@@ -1,6 +1,7 @@
 #include <thread>
+#include <memory>
+#include <swss/dbconnector.h>
 #include "eventd.h"
-#include "dbconnector.h"
 #include "zmq.h"
 
 /*
@@ -56,8 +57,22 @@ static bool s_unit_testing = false;
 int
 eventd_proxy::init()
 {
-    int ret = -1, rc = 0;
-    SWSS_LOG_INFO("Start xpub/xsub proxy");
+	SWSS_LOG_INFO("Start xpub/xsub proxy");
+
+	m_thr = thread(&eventd_proxy::run, this);
+
+    while (!m_init_done) {
+        this_thread::sleep_for(chrono::milliseconds(10));
+    }
+
+	return m_init_result;
+}
+
+void
+eventd_proxy::run()
+{
+	int rc = 0;
+    SWSS_LOG_INFO("Running xpub/xsub proxy");
 
     m_frontend = zmq_socket(m_ctx, ZMQ_XSUB);
     RET_ON_ERR(m_frontend != NULL, "failing to get ZMQ_XSUB socket");
@@ -77,19 +92,32 @@ eventd_proxy::init()
     rc = zmq_bind(m_capture, get_config(string(CAPTURE_END_KEY)).c_str());
     RET_ON_ERR(rc == 0, "Failing to bind capture PUB to %s", get_config(string(CAPTURE_END_KEY)).c_str());
 
-    m_thr = thread(&eventd_proxy::run, this);
-    ret = 0;
-out:
-    return ret;
-}
-
-void
-eventd_proxy::run()
-{
-    SWSS_LOG_INFO("Running xpub/xsub proxy");
+    /* Signal successful initialization to init() */
+    m_init_result = 0;
+    m_init_done = true;
 
     /* runs forever until zmq context is terminated */
     zmq_proxy(m_frontend, m_backend, m_capture);
+
+out:
+    /* Signal failure if we got here before successful init */
+    if (!m_init_done) {
+        m_init_result = 1;
+        m_init_done = true;
+    }
+
+    if (m_frontend != NULL) {
+        zmq_close(m_frontend);
+        m_frontend = NULL;
+    }
+    if (m_backend != NULL) {
+        zmq_close(m_backend);
+        m_backend = NULL;
+    }
+    if (m_capture != NULL) {
+        zmq_close(m_capture);
+        m_capture = NULL;
+    }
 
     SWSS_LOG_INFO("Stopped xpub/xsub proxy");
 }
@@ -110,25 +138,27 @@ stats_collector::stats_collector() :
 void
 stats_collector::set_heartbeat_interval(int val)
 {
+    int interval_count_to_set = 0;
     if (val > 0) {
         /* Round to highest possible multiples of MIN */
-        m_heartbeats_interval_cnt =
+        interval_count_to_set =
             (((val * 1000) + STATS_HEARTBEAT_MIN - 1) / STATS_HEARTBEAT_MIN);
     }
     else if (val == 0) {
         /* Least possible */
-        m_heartbeats_interval_cnt = 1;
+        interval_count_to_set = 1;
     }
     else if (val == -1) {
         /* Turn off heartbeat */
-        m_heartbeats_interval_cnt = 0;
+        interval_count_to_set = 0;
         SWSS_LOG_INFO("Heartbeat turned OFF");
     }
     /* Any other value is ignored as invalid */
+    m_heartbeats_interval_cnt = interval_count_to_set;
 
     SWSS_LOG_INFO("Set heartbeat: val=%d secs cnt=%d min=%d ms final=%d secs",
-            val, m_heartbeats_interval_cnt, STATS_HEARTBEAT_MIN,
-            (m_heartbeats_interval_cnt * STATS_HEARTBEAT_MIN / 1000));
+            val, interval_count_to_set, STATS_HEARTBEAT_MIN,
+            (interval_count_to_set * STATS_HEARTBEAT_MIN / 1000));
 }
 
 
@@ -145,7 +175,7 @@ stats_collector::start()
 
     if (!s_unit_testing) {
         try {
-            m_counters_db = make_shared<swss::DBConnector>("COUNTERS_DB", 0, true);
+            m_counters_db = make_shared<swss::DBConnector>("COUNTERS_DB", 0, false);
         }
         catch (exception &e)
         {
@@ -254,7 +284,7 @@ stats_collector::run_collector()
             if (rc < 0) {
                 SWSS_LOG_ERROR(
                         "event_receive failed with rc=%d; stats:published(%lu)", rc,
-                        m_lst_counters[INDEX_COUNTERS_EVENTS_PUBLISHED]);
+                        m_lst_counters[INDEX_COUNTERS_EVENTS_PUBLISHED].load());
             }
             if (!m_pause_heartbeat && (m_heartbeats_interval_cnt > 0) &&
                     ++hb_cntr >= m_heartbeats_interval_cnt) {
@@ -301,7 +331,9 @@ static bool
 validate_event(const internal_event_t &event, runtime_id_t &rid, sequence_t &seq)
 {
     bool ret = false;
-
+    if(event.empty()) {
+        return ret;
+    }
     internal_event_t::const_iterator itc_r, itc_s, itc_e;
     itc_r = event.find(EVENT_RUNTIME_ID);
     itc_s = event.find(EVENT_SEQUENCE);
@@ -356,7 +388,6 @@ capture_service::do_capture()
     int init_cnt;
     void *cap_sub_sock = NULL;
     counters_t total_overflow = 0;
-    static bool init_done = false;
 
     typedef enum {
         /*
@@ -392,25 +423,6 @@ capture_service::do_capture()
     RET_ON_ERR(rc == 0, "Failed to ZMQ_RCVTIMEO to %d", block_ms);
 
     m_cap_run = true;
-
-    if(!init_done) {
-        zmq_msg_t msg;
-        zmq_msg_init(&msg);
-        int rc = zmq_msg_recv(&msg, cap_sub_sock, 0);
-        RET_ON_ERR(rc == 1, "Failed to read subscription message when XSUB connects to XPUB");
-        /*
-         * When XSUB socket connects to XPUB, a subscription message is sent as a single byte 1.
-         * When capture service begins to read, the very first message that it will read is this
-         * control character.
-         *
-         * We will handle by reading this message and dropping it before we begin reading for
-         * cached events.
-         *
-         * This behavior will only happen once when XSUB connects to XPUB not everytime cache is started.
-         *
-         */
-         init_done = true;
-    }
 
     while (m_ctrl != START_CAPTURE) {
         /* Wait for capture start */
@@ -539,16 +551,18 @@ int
 capture_service::set_control(capture_control_t ctrl, event_serialized_lst_t *lst)
 {
     int ret = -1;
+    int duration = CAPTURE_SERVICE_POLLING_DURATION;
 
     /* Can go in single step only. */
-    RET_ON_ERR((ctrl - m_ctrl) == 1, "m_ctrl(%d)+1 < ctrl(%d)", m_ctrl, ctrl);
+    RET_ON_ERR((ctrl - m_ctrl) == 1, "m_ctrl(%d)+1 < ctrl(%d)", m_ctrl.load(), ctrl);
 
     switch(ctrl) {
         case INIT_CAPTURE:
             m_thr = thread(&capture_service::do_capture, this);
-            for(int i=0; !m_cap_run && (i < 100); ++i) {
-                /* Wait max a second for thread to init */
-                this_thread::sleep_for(chrono::milliseconds(10));
+            for(int i=0; !m_cap_run && (i < CAPTURE_SERVICE_POLLING_RETRIES); ++i) {
+                /* Poll to see if thread has been init, if so exit early. Add delay on every attempt */
+                this_thread::sleep_for(chrono::milliseconds(duration));
+                duration = min(duration + CAPTURE_SERVICE_POLLING_INCREMENT, CAPTURE_SERVICE_POLLING_MAX_DURATION);
             }
             RET_ON_ERR(m_cap_run, "Failed to init capture");
             m_ctrl = ctrl;
@@ -646,7 +660,8 @@ run_eventd_service()
     event_service service;
     stats_collector stats_instance;
     eventd_proxy *proxy = NULL;
-    capture_service *capture = NULL;
+    unique_ptr<capture_service> capture;
+    bool skip_caching = false;
 
     event_serialized_lst_t capture_fifo_events;
     last_events_t capture_last_events;
@@ -676,9 +691,14 @@ run_eventd_service()
      * events until telemetry starts.
      * Telemetry will send a stop & collect cache upon startup
      */
-    capture = new capture_service(zctx, cache_max, &stats_instance);
-    RET_ON_ERR(capture->set_control(INIT_CAPTURE) == 0, "Failed to init capture");
-    RET_ON_ERR(capture->set_control(START_CAPTURE) == 0, "Failed to start capture");
+    capture = make_unique<capture_service>(zctx, cache_max, &stats_instance);
+    if (capture->set_control(INIT_CAPTURE) != 0) {
+        SWSS_LOG_WARN("Failed to initialize capture service, so we skip caching");
+        skip_caching = true;
+        capture.reset(); // Capture service will not be available
+    } else {
+        RET_ON_ERR(capture->set_control(START_CAPTURE) == 0, "Failed to start capture");
+    }
 
     this_thread::sleep_for(chrono::milliseconds(200));
     RET_ON_ERR(stats_instance.is_running(), "Failed to start stats instance");
@@ -694,12 +714,12 @@ run_eventd_service()
             case EVENT_CACHE_INIT:
                 /* connect only*/
                 if (capture != NULL) {
-                    delete capture;
+                    capture.reset();
                 }
                 event_serialized_lst_t().swap(capture_fifo_events);
                 last_events_t().swap(capture_last_events);
 
-                capture = new capture_service(zctx, cache_max, &stats_instance);
+                capture = make_unique<capture_service>(zctx, cache_max, &stats_instance);
                 if (capture != NULL) {
                     resp = capture->set_control(INIT_CAPTURE);
                 }
@@ -708,7 +728,7 @@ run_eventd_service()
 
             case EVENT_CACHE_START:
                 if (capture == NULL) {
-                    SWSS_LOG_ERROR("Cache is not initialized to start");
+                    SWSS_LOG_WARN("Cache is not initialized to start");
                     resp = -1;
                     break;
                 }
@@ -721,7 +741,7 @@ run_eventd_service()
 
             case EVENT_CACHE_STOP:
                 if (capture == NULL) {
-                    SWSS_LOG_ERROR("Cache is not initialized to stop");
+                    SWSS_LOG_WARN("Cache is not initialized to stop");
                     resp = -1;
                     break;
                 }
@@ -731,8 +751,7 @@ run_eventd_service()
                     resp = capture->read_cache(capture_fifo_events, capture_last_events,
                             overflow);
                 }
-                delete capture;
-                capture = NULL;
+                capture.reset();
 
                 /* Unpause heartbeat upon stop caching */
                 stats_instance.heartbeat_ctrl();
@@ -740,6 +759,11 @@ run_eventd_service()
 
 
             case EVENT_CACHE_READ:
+                if (skip_caching) {
+                    SWSS_LOG_WARN("Capture service is unavailable, skipping cache read");
+                    resp = -1;
+                    break;
+                }
                 if (capture != NULL) {
                     SWSS_LOG_ERROR("Cache is not stopped yet.");
                     resp = -1;
@@ -799,16 +823,13 @@ out:
     service.close_service();
     stats_instance.stop();
 
-    if (proxy != NULL) {
-        delete proxy;
-    }
-    if (capture != NULL) {
-        delete capture;
-    }
     if (zctx != NULL) {
         zmq_ctx_term(zctx);
     }
-    SWSS_LOG_ERROR("Eventd service exiting\n");
+    if (proxy != NULL) {
+        delete proxy;
+    }
+    SWSS_LOG_INFO("Eventd service exiting\n");
 }
 
 void set_unit_testing(bool b)

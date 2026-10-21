@@ -1,8 +1,14 @@
 {% if 'advertise-all-vni' in af_val and af_val['advertise-all-vni'] == 'true' %}
   advertise-all-vni
 {% endif %}
+{% if 'advertise-svi-ip' in af_val and af_val['advertise-svi-ip'] == 'true' %}
+  advertise-svi-ip
+{% endif %}
 {% if 'autort' in af_val %}
   autort {{af_val['autort']}}
+{% endif %}
+{% if 'flooding' in af_val %}
+  flooding {{af_val['flooding']}}
 {% endif %}
 {% if 'advertise-default-gw' in af_val and af_val['advertise-default-gw'] == 'true' %}
   advertise-default-gw

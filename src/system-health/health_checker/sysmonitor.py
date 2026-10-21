@@ -4,38 +4,49 @@ import os
 import sys
 import time
 import glob
-import multiprocessing
+import threading
+import queue
 from datetime import datetime
 from swsscommon import swsscommon
 from sonic_py_common.logger import Logger
 from . import utils
-from sonic_py_common.task_base import ProcessTaskBase
+from sonic_py_common.task_base import ThreadTaskBase
+from sonic_py_common import device_info, multi_asic
 from .config import Config
 import signal
+import jinja2
 
 SYSLOG_IDENTIFIER = "system#monitor"
 REDIS_TIMEOUT_MS = 0
 system_allsrv_state = "DOWN"
 spl_srv_list = ['database-chassis', 'gbsyncd']
+NON_BLOCKING_INACTIVE_REASONS = {"exec-condition"}
 SELECT_TIMEOUT_MSECS = 1000
 QUEUE_TIMEOUT = 15
 TASK_STOP_TIMEOUT = 10
+# Backstop for failures missed by JobRemoved (e.g. fast crash + auto-restart)
+PERIODIC_POLL_INTERVAL_SECS = 15
+# Combined wall-clock budget for both monitor threads to signal readiness before initial service scan
+SUBSCRIPTION_READY_TIMEOUT_SEC = 60
 logger = Logger(log_identifier=SYSLOG_IDENTIFIER)
+exclude_srv_list = ['ztp.service']
 
+#Thread which subscribes to STATE_DB FEATURE table for any update
+#and push service events to main thread via queue
+class MonitorStateDbTask(ThreadTaskBase):
 
-#Subprocess which subscribes to STATE_DB FEATURE table for any update
-#and push service events to main process via queue
-class MonitorStateDbTask(ProcessTaskBase):
-
-    def __init__(self,myQ):
-        ProcessTaskBase.__init__(self)
+    def __init__(self, myQ, subscription_ready=None):
+        ThreadTaskBase.__init__(self)
         self.task_queue = myQ
+        self._subscription_ready = subscription_ready
 
     def subscribe_statedb(self):
         state_db = swsscommon.DBConnector("STATE_DB", REDIS_TIMEOUT_MS, False)
         sel = swsscommon.Select()
         cst = swsscommon.SubscriberStateTable(state_db, "FEATURE")
         sel.addSelectable(cst)
+        if self._subscription_ready is not None:
+            self._subscription_ready.set()
 
         while not self.task_stopping_event.is_set():
             (state, c) = sel.select(SELECT_TIMEOUT_MSECS)
@@ -65,13 +76,16 @@ class MonitorStateDbTask(ProcessTaskBase):
         self.task_queue.put(msg)
 
 
-#Subprocess which subscribes to system dbus to listen for systemd events
-#and push service events to main process via queue
-class MonitorSystemBusTask(ProcessTaskBase):
+#Thread which subscribes to system dbus to listen for systemd events
+#and push service events to main thread via queue
+class MonitorSystemBusTask(ThreadTaskBase):
 
-    def __init__(self,myQ):
-        ProcessTaskBase.__init__(self)
+    def __init__(self, myQ, subscription_ready=None):
+        ThreadTaskBase.__init__(self)
         self.task_queue = myQ
+        self.loop = None
+        self.GLib = None
+        self._subscription_ready = subscription_ready
 
     def on_job_removed(self, id, job, unit, result):
         if result == "done" or result == "failed":
@@ -86,15 +100,18 @@ class MonitorSystemBusTask(ProcessTaskBase):
         from gi.repository import GLib
         from dbus.mainloop.glib import DBusGMainLoop
 
+        self.GLib = GLib
         DBusGMainLoop(set_as_default=True)
         bus = dbus.SystemBus()
         systemd = bus.get_object('org.freedesktop.systemd1', '/org/freedesktop/systemd1')
         manager = dbus.Interface(systemd, 'org.freedesktop.systemd1.Manager')
         manager.Subscribe()
         manager.connect_to_signal('JobRemoved', self.on_job_removed)
+        if self._subscription_ready is not None:
+            self._subscription_ready.set()
 
-        loop = GLib.MainLoop()
-        loop.run()
+        self.loop = GLib.MainLoop()
+        self.loop.run()
 
     def task_worker(self):
         if self.task_stopping_event.is_set():
@@ -102,24 +119,37 @@ class MonitorSystemBusTask(ProcessTaskBase):
         logger.log_info("Start Listening to systemd bus (pid {0})".format(os.getpid()))
         self.subscribe_sysbus()
 
+    def task_stop(self):
+        # Signal the thread to stop
+        self.task_stopping_event.set()
+        
+        # Stop GLib.MainLoop to unblock the thread
+        if self.loop is not None and self.GLib is not None:
+            self.GLib.idle_add(self.loop.quit)
+
+        # Wait for the thread to exit
+        if self._task_thread is not None:
+            self._task_thread.join(TASK_STOP_TIMEOUT)
+
+        return True
+
     def task_notify(self, msg):
         if self.task_stopping_event.is_set():
             return
         self.task_queue.put(msg)
 
-#Mainprocess which launches 2 subtasks - systembus task and statedb task
+#Main thread which launches 2 subtasks - systembus task and statedb task
 #and on receiving events, checks and updates the system ready status to state db
-class Sysmonitor(ProcessTaskBase):
+class Sysmonitor(ThreadTaskBase):
 
     def __init__(self):
-        ProcessTaskBase.__init__(self)
+        ThreadTaskBase.__init__(self)
         self._stop_timeout_secs = TASK_STOP_TIMEOUT
         self.dnsrvs_name = set()
         self.state_db = None
         self.config_db = None
         self.config = Config()
-        self.mpmgr = multiprocessing.Manager()
-        self.myQ = self.mpmgr.Queue()
+        self.myQ = queue.Queue()
 
     #Sets system ready status to state db
     def post_system_status(self, state):
@@ -156,8 +186,48 @@ class Sysmonitor(ProcessTaskBase):
                 if srv in dir_list:
                     dir_list.remove(srv)
 
+	#Remove services from exclude list Eg.ztp.service
+        for srv in exclude_srv_list:
+            if srv in dir_list:
+                dir_list.remove(srv)
+
+        #On multi-ASIC: prune host-level services that should only run as per-ASIC instances
+        if multi_asic.is_multi_asic():
+            feature_table = self.config_db.get_table("FEATURE")
+            prune = []
+            for srv_ext in dir_list:
+                if '@' in srv_ext:
+                    continue
+                srv_name = srv_ext.replace('.service', '')
+                if srv_name in feature_table:
+                    raw_scope = feature_table[srv_name].get('has_global_scope', 'True')
+                    if raw_scope.lower() == 'false':
+                        prune.append(srv_ext)
+            for srv_ext in prune:
+                dir_list.remove(srv_ext)
+
         dir_list.sort()
         return dir_list
+
+    def get_render_value_for_field(self, configuration, device_config, expected_values):
+        """ Returns the target value by rendering the configuration as J2 template.
+
+        Args:
+            configuration (str): Table value from CONFIG_DB for given field
+            device_config (dict): DEVICE_METADATA section of CONFIG_DB and populated Device Running Metadata which is needed for rendering
+            expected_values (list): Expected set of values for given field
+        Returns:
+            (str): Target value for given key
+        """
+
+        if configuration is None:
+            return None
+
+        template = jinja2.Template(configuration)
+        target_value = template.render(device_config) # nosemgrep: python.flask.security.xss.audit.direct-use-of-jinja2.direct-use-of-jinja2
+        if target_value not in expected_values:
+            raise ValueError('Invalid value rendered for configuration {}: {}'.format(configuration, target_value))
+        return target_value
 
     def get_service_from_feature_table(self, dir_list):
         """Get service from CONFIG DB FEATURE table. During "config reload" command, filling FEATURE table
@@ -177,16 +247,23 @@ class Sysmonitor(ProcessTaskBase):
 
         while max_retry > 0:
             success = True
-            feature_table = self.config_db.get_table("FEATURE")
-            for srv, fields in feature_table.items():
-                if 'state' not in fields:
-                    success = False
-                    logger.log_warning("FEATURE table is not fully ready: {}, retrying".format(feature_table))
-                    break
-                if fields["state"] not in ["disabled", "always_disabled"]:
-                    srvext = srv + ".service"
-                    if srvext not in dir_list:
-                        dir_list.append(srvext)
+            try:
+                feature_table = self.config_db.get_table("FEATURE")
+                device_config = {}
+                device_config['DEVICE_METADATA'] = self.config_db.get_table('DEVICE_METADATA')
+                device_config.update(device_info.get_device_runtime_metadata())
+                for srv, fields in feature_table.items():
+                    if 'state' not in fields:
+                        success = False
+                        logger.log_warning("FEATURE table is not fully ready: {}, retrying".format(feature_table))
+                        break
+                    state = self.get_render_value_for_field(fields["state"], device_config, ['enabled', 'disabled', 'always_enabled', 'always_disabled'])
+                    if state not in ["disabled", "always_disabled"]:
+                        srvext = srv + ".service"
+                        if srvext not in dir_list:
+                            dir_list.append(srvext)
+            except:
+                success = False
             if not success:
                 max_retry -= 1
                 time.sleep(retry_delay)
@@ -237,7 +314,13 @@ class Sysmonitor(ProcessTaskBase):
 
     #Gets the service properties
     def run_systemctl_show(self, service):
-        command = ('systemctl show {} --property=Id,LoadState,UnitFileState,Type,ActiveState,SubState,Result'.format(service))
+        command = [
+            'systemctl',
+            'show',
+            '--property=Id,LoadState,UnitFileState,Type,ActiveState,SubState,Result,ConditionResult,ConditionTimestampMonotonic',
+            '--',
+            service
+        ]
         output = utils.run_command(command)
         srv_properties = output.split('\n')
         prop_dict = {}
@@ -272,7 +355,7 @@ class Sysmonitor(ProcessTaskBase):
         try:
             service_status = "Down"
             service_up_status = "Down"
-            service_name,last_name = event.split('.')
+            service_name,last_name = event.rsplit('.', 1)
 
             sysctl_show = self.run_systemctl_show(event)
 
@@ -287,7 +370,7 @@ class Sysmonitor(ProcessTaskBase):
                 #Raise syslog for service state change
                 logger.log_info("{} service state changed to [{}/{}]".format(event, active_state, sub_state))
 
-                if status == "enabled" or status == "enabled-runtime" or status == "static":
+                if status in ("enabled", "enabled-runtime", "static", "generated"):
                     if fail_reason == "success":
                         fail_reason = "-"
                     if (active_state == "active" and sub_state == "exited"):
@@ -313,10 +396,21 @@ class Sysmonitor(ProcessTaskBase):
                         service_status = "Stopping"
                         service_up_status = "Stopping"
                     elif active_state == "inactive":
-                        if srv_type == "oneshot" or service_name in spl_srv_list:
+                        condition_result = sysctl_show.get('ConditionResult', 'yes')
+                        condition_ts = sysctl_show.get('ConditionTimestampMonotonic', '0')
+                        # Require a nonzero timestamp: ConditionResult=no alone can't tell a real
+                        # condition-skip from a GC'd/reloaded stopped static service (ts stays 0).
+                        condition_unmet = (condition_result == "no"
+                                and condition_ts not in ("0", "", None))
+                        is_known_non_blocking = (srv_type == "oneshot"
+                                or service_name in spl_srv_list
+                                or fail_reason in NON_BLOCKING_INACTIVE_REASONS)
+                        if is_known_non_blocking or condition_unmet:
                             service_status = "OK"
                             service_up_status = "OK"
                             unit_status = "OK"
+                            if not is_known_non_blocking and condition_unmet:
+                                fail_reason = "condition-unmet"
                         else:
                             unit_status = "NOT OK"
                             if fail_reason == "-":
@@ -335,25 +429,36 @@ class Sysmonitor(ProcessTaskBase):
     #Gets status of all the services from service list
     def get_all_system_status(self):
         """ Shows the system ready status"""
-        #global dnsrvs_name
-        scan_srv_list = []
-
-        scan_srv_list = self.get_all_service_list()
-        for service in scan_srv_list:
+        # Rebuild dnsrvs_name from scratch so this is safe to call repeatedly
+        # (e.g. from the periodic backstop poll); services that recovered get cleared.
+        fresh_down = set()
+        for service in self.get_all_service_list():
             ustate = self.get_unit_status(service)
             if ustate == "NOT OK":
-                if service not in self.dnsrvs_name:
-                    self.dnsrvs_name.add(service)
+                fresh_down.add(service)
+            elif ustate is None and service in self.dnsrvs_name:
+                # Status couldn't be determined (e.g. systemctl timeout/missing
+                # output). Preserve the previous DOWN state to avoid a false
+                # recovery on transient failures.
+                fresh_down.add(service)
 
-        if len(self.dnsrvs_name) == 0:
-            return "UP"
-        else:
-            return "DOWN"
+        self.dnsrvs_name = fresh_down
+        return "UP" if not fresh_down else "DOWN"
 
     #Displays the system ready status message on console
     def print_console_message(self, message):
-        with open('/dev/console', 'w') as console:
-            console.write("\n{} {}\n".format(datetime.now().strftime("%b %d %H:%M:%S.%f"), message))
+        # /dev/console is a best-effort, out-of-band notification: on some
+        # platforms (e.g. a virtual/simulated serial console) a write
+        # can transiently fail with OSError/IOError (such as EIO) even
+        # though the system status itself was already published via
+        # syslog and STATE_DB above. Do not let that surface as an ERR in
+        # the main event loop; fall back to a syslog NOTICE with the same
+        # message so it is not lost when the console write fails.
+        try:
+            with open('/dev/console', 'w') as console:
+                console.write("\n{} {}\n".format(datetime.now().strftime("%b %d %H:%M:%S.%f"), message))
+        except (OSError, IOError):
+            logger.log_notice("\n{} {}\n".format(datetime.now().strftime("%b %d %H:%M:%S.%f"), message))
 
     #Publish the system ready status message on logger,console and state db
     def publish_system_status(self, astate):
@@ -388,6 +493,21 @@ class Sysmonitor(ProcessTaskBase):
         full_srv_list = self.get_all_service_list()
         if event in full_srv_list:
             ustate = self.get_unit_status(event)
+            if ustate is None:
+                #Service is masked/not-loaded — clean up both dnsrvs_name and stale STATE_DB entry
+                if event in self.dnsrvs_name:
+                    self.dnsrvs_name.remove(event)
+                srv_name, last = event.rsplit('.', 1)
+                if last == "service":
+                    key = 'ALL_SERVICE_STATUS|{}'.format(srv_name)
+                    if self.state_db.exists(self.state_db.STATE_DB, key):
+                        self.state_db.delete(self.state_db.STATE_DB, key)
+                if len(self.dnsrvs_name) == 0:
+                    astate = "UP"
+                else:
+                    astate = "DOWN"
+                self.publish_system_status(astate)
+                return 0
             if ustate == "OK" and system_allsrv_state == "UP":
                 astate = "UP"
             elif ustate == "OK" and system_allsrv_state == "DOWN":
@@ -415,7 +535,7 @@ class Sysmonitor(ProcessTaskBase):
                 astate = "DOWN"
             self.publish_system_status(astate)
 
-            srv_name,last = event.split('.')
+            srv_name,last = event.rsplit('.', 1)
             # stop on service maybe propagated to timers and in that case,
             # the state_db entry for the service should not be deleted
             if last == "service":
@@ -426,40 +546,72 @@ class Sysmonitor(ProcessTaskBase):
 
         return 0
 
+    def _wait_for_monitor_subscriptions(self, dbus_ready, statedb_ready):
+        """Block until both monitor threads signal listener registration.
+
+        Single monotonic deadline: total wall time is at most SUBSCRIPTION_READY_TIMEOUT_SEC
+        (both threads already run in parallel).
+        """
+        deadline = time.monotonic() + SUBSCRIPTION_READY_TIMEOUT_SEC
+        monitors = (
+            (dbus_ready, "systemd dbus monitor did not finish Subscribe"),
+            (statedb_ready, "STATE_DB FEATURE monitor did not finish subscribing"),
+        )
+        for ev, detail in monitors:
+            remaining = deadline - time.monotonic()
+            if not ev.wait(timeout=max(0.0, remaining)):
+                logger.log_error(
+                    "Timeout: {} within {}s (combined budget)".format(detail, SUBSCRIPTION_READY_TIMEOUT_SEC))
+                sys.exit(1)
+
     def system_service(self):
         if not self.state_db:
             self.state_db = swsscommon.SonicV2Connector(use_unix_socket_path=True)
             self.state_db.connect(self.state_db.STATE_DB)
 
-        try:
-            monitor_system_bus = MonitorSystemBusTask(self.myQ)
-            monitor_system_bus.task_run()
+        dbus_ready = threading.Event()
+        statedb_ready = threading.Event()
 
-            monitor_statedb_table = MonitorStateDbTask(self.myQ)
+        try:
+            monitor_system_bus = MonitorSystemBusTask(self.myQ, subscription_ready=dbus_ready)
+            monitor_system_bus.task_run()
+            monitor_statedb_table = MonitorStateDbTask(self.myQ, subscription_ready=statedb_ready)
             monitor_statedb_table.task_run()
 
         except Exception as e:
             logger.log_error("SubProcess-{}".format(str(e)))
             sys.exit(1)
 
-
+        self._wait_for_monitor_subscriptions(dbus_ready, statedb_ready)
         self.update_system_status()
+        last_full_scan_ts = time.monotonic()
 
         from queue import Empty
         # Queue to receive the STATEDB and Systemd state change event
-        while not self.task_stopping_event.is_set():
+        while True:
             try:
                 msg = self.myQ.get(timeout=QUEUE_TIMEOUT)
+                if msg == "stop":
+                    break
                 event = msg["unit"]
                 event_src = msg["evt_src"]
                 event_time = msg["time"]
                 logger.log_debug("Main process- received event:{} from source:{} time:{}".format(event,event_src,event_time))
                 logger.log_info("check_unit_status for [ "+event+" ] ")
                 self.check_unit_status(event)
-            except Empty:
+            except (Empty, EOFError):
                 pass
             except Exception as e:
                 logger.log_error("system_service"+str(e))
+
+            # Backstop: if no JobRemoved event arrived for a transient failure
+            # (crash + auto-restart inside one window), the next full scan catches it.
+            if time.monotonic() - last_full_scan_ts >= PERIODIC_POLL_INTERVAL_SECS:
+                try:
+                    self.update_system_status()
+                except Exception as e:
+                    logger.log_error("periodic update_system_status: "+str(e))
+                last_full_scan_ts = time.monotonic()
 
         #cleanup tables  "'ALL_SERVICE_STATUS*', 'SYSTEM_READY*'" from statedb
         self.state_db.delete_all_by_pattern(self.state_db.STATE_DB, "ALL_SERVICE_STATUS|*")
@@ -469,28 +621,17 @@ class Sysmonitor(ProcessTaskBase):
         monitor_statedb_table.task_stop()
 
     def task_worker(self):
-        if self.task_stopping_event.is_set():
-            return
         self.system_service()
 
     def task_stop(self):
-        # Signal the process to stop
-        self.task_stopping_event.set()
-        #Clear the resources of mpmgr- Queue
-        self.mpmgr.shutdown()
+        self.myQ.put("stop")
 
-        # Wait for the process to exit
-        self._task_process.join(self._stop_timeout_secs)
+        # Wait for the thread to exit
+        self._task_thread.join(self._stop_timeout_secs)
 
-        # If the process didn't exit, attempt to kill it
-        if self._task_process.is_alive():
-            logger.log_notice("Attempting to kill sysmon main process with pid {}".format(self._task_process.pid))
-            os.kill(self._task_process.pid, signal.SIGKILL)
-
-        if self._task_process.is_alive():
-            logger.log_error("Sysmon main process with pid {} could not be killed".format(self._task_process.pid))
+        # If the thread didn't exit, log warning
+        if self._task_thread.is_alive():
+            logger.log_notice("Sysmon main thread did not exit within timeout")
             return False
 
         return True
-
-

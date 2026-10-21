@@ -24,10 +24,6 @@
             "i2c":
             {
                 "valmap": { "1":true, "0":false }
-            },
-            "bmc":
-            {
-                "valmap": { "0x0280|":true, "0x0180|":false }
             }
         }, 
 		
@@ -36,11 +32,7 @@
             "i2c":
             {
                 "valmap": { "1": true, "0":false }
-            },
-            "bmc":
-            {
-                "valmap": { "0x0280|":true, "0x0180|":false }
-            }        
+            }
         },
 
         "psu_fan_dir":
@@ -50,7 +42,7 @@
                 "valmap": { "F2B":"EXHAUST", "B2F":"INTAKE" }
             }
         },
-
+        "DEFAULT_TYPE": "AC",
         "PSU_FAN_MAX_SPEED":"30000"
     },
 

@@ -30,6 +30,7 @@
 #include <linux/hwmon-sysfs.h>
 #include <linux/err.h>
 #include <linux/mutex.h>
+#include <linux/version.h>
 #include "x86-64-ufispace-s9300-32d-cpld.h"
 
 #ifdef DEBUG
@@ -437,31 +438,31 @@ static SENSOR_DEVICE_ATTR(cpld_qsfpdd_reset_ctrl_g0, \
         read_cpld_callback, write_cpld_callback, \
         CPLD_QSFPDD_RESET_CTRL_G0);
 static SENSOR_DEVICE_ATTR(cpld_qsfpdd_reset_ctrl_g1, \
-	    S_IWUSR | S_IRUGO, \
+        S_IWUSR | S_IRUGO, \
         read_cpld_callback, write_cpld_callback, \
         CPLD_QSFPDD_RESET_CTRL_G1);
 static SENSOR_DEVICE_ATTR(cpld_qsfpdd_reset_ctrl_g2, \
-	    S_IWUSR | S_IRUGO, \
+        S_IWUSR | S_IRUGO, \
         read_cpld_callback, write_cpld_callback, \
         CPLD_QSFPDD_RESET_CTRL_G2);
 static SENSOR_DEVICE_ATTR(cpld_qsfpdd_reset_ctrl_g3, \
-	    S_IWUSR | S_IRUGO, \
+        S_IWUSR | S_IRUGO, \
         read_cpld_callback, write_cpld_callback, \
         CPLD_QSFPDD_RESET_CTRL_G3);
 static SENSOR_DEVICE_ATTR(cpld_qsfpdd_lp_mode_g0, \
-	    S_IWUSR | S_IRUGO, \
+        S_IWUSR | S_IRUGO, \
         read_cpld_callback, write_cpld_callback, \
         CPLD_QSFPDD_LP_MODE_G0);
 static SENSOR_DEVICE_ATTR(cpld_qsfpdd_lp_mode_g1, \
-	    S_IWUSR | S_IRUGO, \
+        S_IWUSR | S_IRUGO, \
         read_cpld_callback, write_cpld_callback, \
         CPLD_QSFPDD_LP_MODE_G1);
 static SENSOR_DEVICE_ATTR(cpld_qsfpdd_lp_mode_g2, \
-	    S_IWUSR | S_IRUGO, \
+        S_IWUSR | S_IRUGO, \
         read_cpld_callback, write_cpld_callback, \
         CPLD_QSFPDD_LP_MODE_G2);
 static SENSOR_DEVICE_ATTR(cpld_qsfpdd_lp_mode_g3, \
-	    S_IWUSR | S_IRUGO, \
+        S_IWUSR | S_IRUGO, \
         read_cpld_callback, write_cpld_callback, \
         CPLD_QSFPDD_LP_MODE_G3);
 static SENSOR_DEVICE_ATTR(cpld_sfp_tx_dis, S_IWUSR | S_IRUGO, \
@@ -717,7 +718,7 @@ static ssize_t write_bsp_callback(struct device *dev,
     switch (attr->index) {
         case BSP_DEBUG:
             str = bsp_debug;
-            str_len = sizeof(str);
+            str_len = sizeof(bsp_debug);
             ret = write_bsp(buf, str, str_len, count);
 
             if (kstrtou8(buf, 0, &bsp_debug_u8) < 0) {
@@ -1434,9 +1435,15 @@ static void s9300_cpld_remove_client(struct i2c_client *client)
 }
 
 /* cpld drvier probe */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 3, 0)
 static int s9300_cpld_probe(struct i2c_client *client,
                     const struct i2c_device_id *dev_id)
 {
+#else
+static int s9300_cpld_probe(struct i2c_client *client)
+{
+    const struct i2c_device_id *dev_id = i2c_client_get_device_id(client);
+#endif
     int status;
     struct cpld_data *data = NULL;
     int ret = -EPERM;
@@ -1527,7 +1534,12 @@ exit:
 }
 
 /* cpld drvier remove */
-static int s9300_cpld_remove(struct i2c_client *client)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
+static int
+#else
+static void
+#endif
+s9300_cpld_remove(struct i2c_client *client)
 {
     struct cpld_data *data = i2c_get_clientdata(client);
 
@@ -1544,7 +1556,9 @@ static int s9300_cpld_remove(struct i2c_client *client)
     }
 
     s9300_cpld_remove_client(client);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
     return 0;
+#endif
 }
 
 MODULE_DEVICE_TABLE(i2c, s9300_cpld_id);

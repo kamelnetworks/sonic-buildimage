@@ -1,3 +1,4 @@
+import pytest
 import sys
 from unittest import mock
 
@@ -8,23 +9,41 @@ import utilities_common.cli as clicommon
 sys.path.append('../cli/show/plugins/')
 import show_dhcp_server
 
+BRIDGE_FDB_MAC = {
+    "10:70:fd:b6:13:03": "dpu0"
+}
 
-class TestShowDHCPServer(object):
+
+class TestShowDHCPServerLease(object):
     def test_plugin_registration(self):
         cli = mock.MagicMock()
         show_dhcp_server.register(cli)
 
+    @pytest.fixture(scope="class", autouse=True)
+    def mock_run_cmd_fixture(self):
+        def mock_run_command(cmd, return_cmd=False, shell=False):
+            splits = cmd.split("sudo bridge fdb show | grep ")
+            if len(splits) == 2 and splits[1] in BRIDGE_FDB_MAC:
+                return ("{} dev {} master bridge-midplane".format(splits[1], BRIDGE_FDB_MAC[splits[1]]), 0)
+            else:
+                return ("", 0)
+
+        with mock.patch("utilities_common.cli.run_command", side_effect=mock_run_command):
+            yield
+
     def test_show_dhcp_server_ipv4_lease_without_dhcpintf(self, mock_db):
         expected_stdout = """\
-+---------------------+-------------------+-------------+---------------------+---------------------+
-| Interface           | MAC Address       | IP          | Lease Start         | Lease End           |
-+=====================+===================+=============+=====================+=====================+
-| Vlan1000|Ethernet10 | 10:70:fd:b6:13:00 | 192.168.0.1 | 2023-03-01 03:16:21 | 2023-03-01 03:31:21 |
-+---------------------+-------------------+-------------+---------------------+---------------------+
-| Vlan1000|Ethernet11 | 10:70:fd:b6:13:01 | 192.168.0.2 | 2023-03-01 03:16:21 | 2023-03-01 03:31:21 |
-+---------------------+-------------------+-------------+---------------------+---------------------+
-| Vlan1001|<Unknown>  | 10:70:fd:b6:13:02 | 192.168.0.3 | 2023-03-01 03:16:21 | 2023-03-01 03:31:21 |
-+---------------------+-------------------+-------------+---------------------+---------------------+
++----------------------+-------------------+-------------+---------------------+---------------------+
+| Interface            | MAC Address       | IP          | Lease Start         | Lease End           |
++======================+===================+=============+=====================+=====================+
+| Vlan1000|Ethernet10  | 10:70:fd:b6:13:00 | 192.168.0.1 | 2023-03-01 03:16:21 | 2023-03-01 03:31:21 |
++----------------------+-------------------+-------------+---------------------+---------------------+
+| Vlan1000|Ethernet11  | 10:70:fd:b6:13:01 | 192.168.0.2 | 2023-03-01 03:16:21 | 2023-03-01 03:31:21 |
++----------------------+-------------------+-------------+---------------------+---------------------+
+| Vlan1001|<Unknown>   | 10:70:fd:b6:13:02 | 192.168.0.3 | 2023-03-01 03:16:21 | 2023-03-01 03:31:21 |
++----------------------+-------------------+-------------+---------------------+---------------------+
+| bridge-midplane|dpu0 | 10:70:fd:b6:13:03 | 192.168.0.4 | 2023-03-01 03:16:21 | 2023-03-01 03:31:21 |
++----------------------+-------------------+-------------+---------------------+---------------------+
 """
         runner = CliRunner()
         db = clicommon.Db()
@@ -65,6 +84,28 @@ class TestShowDHCPServer(object):
         assert result.exit_code == 0, "exit code: {}, Exception: {}, Traceback: {}".format(result.exit_code, result.exception, result.exc_info)
         assert result.stdout == expected_stdout
 
+
+class TestShowDHCPServer(object):
+    def test_plugin_registration(self):
+        cli = mock.MagicMock()
+        show_dhcp_server.register(cli)
+
+    @pytest.mark.parametrize("state", ["disabled", "enabled"])
+    def test_show_dhcp_server_feature_state_checking(self, mock_db, state):
+        runner = CliRunner()
+        db = clicommon.Db()
+        db.db = mock_db
+        mock_db.set("CONFIG_DB", "FEATURE|dhcp_server", "state", state)
+        result = runner.invoke(show_dhcp_server.dhcp_server, obj=db)
+        if state == "disabled":
+            assert result.exit_code == 2, "exit code: {}, Exception: {}, Traceback: {}".format(result.exit_code, result.exception, result.exc_info)
+            assert "Feature dhcp_server is not enabled" in result.output
+        elif state == "enabled":
+            assert result.exit_code == 0, "exit code: {}, Exception: {}, Traceback: {}".format(result.exit_code, result.exception, result.exc_info)
+            assert "Usage: dhcp_server [OPTIONS] COMMAND [ARGS]" in result.output
+        else:
+            assert False
+
     def test_show_dhcp_server_ipv4_range_without_name(self, mock_db):
         expected_stdout = """\
 +---------+------------+------------+------------------------+
@@ -75,6 +116,10 @@ class TestShowDHCPServer(object):
 | range2  | 100.1.1.9  | 100.1.1.8  | range value is illegal |
 +---------+------------+------------+------------------------+
 | range3  | 100.1.1.10 | 100.1.1.10 | 1                      |
++---------+------------+------------+------------------------+
+| range5  | 100.1.2.10 | 100.1.2.10 | 1                      |
++---------+------------+------------+------------------------+
+| range6  | 100.1.2.11 | 100.1.2.11 | 1                      |
 +---------+------------+------------+------------------------+
 """
         runner = CliRunner()
@@ -176,12 +221,25 @@ class TestShowDHCPServer(object):
         assert result.exit_code == 0, "exit code: {}, Exception: {}, Traceback: {}".format(result.exit_code, result.exception, result.exc_info)
         assert result.stdout == expected_stdout
 
+        expected_stdout = """\
++-------------+--------+-----------+---------------+-----------------+----------+----------------------+
+| Interface   | Mode   | Gateway   | Netmask       |   Lease Time(s) | State    | Customized Options   |
++=============+========+===========+===============+=================+==========+======================+
+| Vlan300     | PORT   | 100.1.1.1 | 255.255.255.0 |            3600 | disabled |                      |
++-------------+--------+-----------+---------------+-----------------+----------+----------------------+
+"""
+        result = runner.invoke(show_dhcp_server.dhcp_server.commands["ipv4"].commands["info"], ["Vlan300", "--with_customized_options"], obj=db)
+        assert result.exit_code == 0, "exit code: {}, Exception: {}, Traceback: {}".format(result.exit_code, result.exception, result.exc_info)
+        assert result.stdout == expected_stdout
+
     def test_show_dhcp_server_ipv4_option_without_name(self, mock_db):
         expected_stdout = """\
 +---------------+-------------+-------------+--------+
 | Option Name   |   Option ID | Value       | Type   |
 +===============+=============+=============+========+
-| option60      |          60 | dummy_value | string |
+| option60      |         163 | dummy_value | string |
++---------------+-------------+-------------+--------+
+| option61      |         164 | dummy_value | string |
 +---------------+-------------+-------------+--------+
 """
         runner = CliRunner()
@@ -196,7 +254,7 @@ class TestShowDHCPServer(object):
 +---------------+-------------+-------------+--------+
 | Option Name   |   Option ID | Value       | Type   |
 +===============+=============+=============+========+
-| option60      |          60 | dummy_value | string |
+| option60      |         163 | dummy_value | string |
 +---------------+-------------+-------------+--------+
 """
         runner = CliRunner()
@@ -212,13 +270,13 @@ class TestShowDHCPServer(object):
 | Interface         | Bind       |
 +===================+============+
 | Vlan100|Ethernet4 | 100.1.1.10 |
-|                   | 10.1.1.11  |
+|                   | 100.1.1.11 |
 +-------------------+------------+
 | Vlan100|Ethernet7 | range1     |
 |                   | range3     |
 +-------------------+------------+
-| Vlan200|Ethernet8 | range1     |
-|                   | range4     |
+| Vlan200|Ethernet8 | range5     |
+|                   | range6     |
 +-------------------+------------+
 | Ethernet9         | range5     |
 |                   | range6     |
@@ -253,7 +311,7 @@ class TestShowDHCPServer(object):
 | Interface         | Bind       |
 +===================+============+
 | Vlan100|Ethernet4 | 100.1.1.10 |
-|                   | 10.1.1.11  |
+|                   | 100.1.1.11 |
 +-------------------+------------+
 | Vlan100|Ethernet7 | range1     |
 |                   | range3     |
@@ -271,8 +329,8 @@ class TestShowDHCPServer(object):
 +-------------------+--------+
 | Interface         | Bind   |
 +===================+========+
-| Vlan200|Ethernet8 | range1 |
-|                   | range4 |
+| Vlan200|Ethernet8 | range5 |
+|                   | range6 |
 +-------------------+--------+
 """
         runner = CliRunner()

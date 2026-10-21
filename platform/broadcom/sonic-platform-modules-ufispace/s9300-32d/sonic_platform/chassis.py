@@ -12,8 +12,6 @@ try:
 except ImportError as e:
     raise ImportError(str(e) + "- required module not found")
 
-NUM_COMPONENT = 5
-
 class Chassis(PddfChassis):
     """
     PDDF Platform-specific Chassis class
@@ -23,13 +21,6 @@ class Chassis(PddfChassis):
 
     def __init__(self, pddf_data=None, pddf_plugin_data=None):
         PddfChassis.__init__(self, pddf_data, pddf_plugin_data)
-        self._initialize_components()
-
-    def _initialize_components(self):
-        from sonic_platform.component import Component
-        for index in range(NUM_COMPONENT):
-            component = Component(index)
-            self._component_list.append(component)
             
     # Provide the functions/variables below for which implementation is to be overwritten
 
@@ -152,7 +143,7 @@ class Chassis(PddfChassis):
                 pass
                 #self._sfp_list[int(index)].check_sfp_optoe_type()
         return ret_dict
-            
+
     def get_reboot_cause(self):
         """
         Retrieves the cause of the previous reboot
@@ -175,3 +166,14 @@ class Chassis(PddfChassis):
             sw_reboot_cause = "Unknown"
 
         return ('REBOOT_CAUSE_NON_HARDWARE', sw_reboot_cause)
+
+    def get_serial_number(self):
+        """
+        Retrieves the hardware serial number for the chassis
+
+        Returns:
+            A string containing the hardware serial number for this
+            chassis.
+        """
+
+        return self.get_serial()

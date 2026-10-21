@@ -6,6 +6,7 @@ steps:
     if [[ "$SONIC_VERSION" == *dirty* ]]; then
       # Print the detail dirty info
       git status --untracked-files=no -s --ignore-submodules
+      git diff --ignore-submodules
 
       # Exit with error, if it is a PR build
       if [ "$(Build.Reason)" == "PullRequest" ]; then

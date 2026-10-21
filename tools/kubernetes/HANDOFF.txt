@@ -1,0 +1,125 @@
+Handoff: 2026-10-20, successful Marvell installer build
+
+PR: https://github.com/kamelnetworks/sonic-buildimage/pull/24 (open, draft).
+Branch: kamel/202611-master. Do not open a replacement PR or merge master.
+Upstream base: 8ef49ca84e5036d5bb9f82350b46f20d70c19bc7.
+Target: Marvell Teralynx / Celestica Silverstone-x, amd64, non-FIPS Trixie.
+
+CURRENT RESULT
+Full-image attempt 6 succeeded: make exit 0, installer exists and is exported.
+Started 2026-10-20T17:37:11Z; finished 2026-10-20T17:57:24Z (20m13s).
+Installer recipe: 17:39:14--17:57:06 UTC, 17m52s. This retry used existing
+packages, containers and caches; it is not a cold or clean incremental benchmark.
+No build is left running. Preserve sonic-builder, its PVC, daemon and caches.
+
+Installer: target/sonic-marvell-teralynx.bin, 1,097,463,791 bytes.
+SHA-256 (identical in pod and exported copy):
+  8f648e31fad31ff9289f7c61adcae56e5de3cce4a110e7303e679cb574639807
+Payload SHA-1: 60d5fff9863e54a0256f56c0068ea0a61f1c89aa.
+Read-only verification passed without executing the installer:
+- Exact exit_marker boundary, payload length/SHA-1, no trailing bytes, outer tar.
+- Nested fs.zip CRCs, including kernel, initrd, SquashFS, platform and DockerFS.
+- DockerFS gzip/tar scan: 23,831 members. It is inside fs.zip in this artifact.
+- Debian 13.7; kernel/initrd 6.12.41+deb13-sonic-amd64; Marvell Teralynx ASIC.
+- Silverstone-x device/HWSKU files and platform Debian package are included.
+- All nine modules extracted from that package have the exact SONiC vermagic;
+  its dependency is linux-image-6.12.41+deb13-sonic-amd64-unsigned.
+Hardware boot, module loading and DVS have NOT been validated.
+
+SOURCE / LIMIT FIXES
+The preserved pod checkout remains at source commit 41d1fd836 with the exact
+Makefile.work changes published in 232086a4d and 9f6b40c0f applied in place.
+Image version: kamel_202611-master-kamel.0-dirty-20261020.173714.
+Embedded commit_id is 41d1fd836; do not describe it as a clean build of PR HEAD.
+Makefile.work SHA-256 in both pod and committed local source:
+  91943a14008855cdccffb6e391da65d76a354b2d61b4f42ae3a3086f5a311790
+Generated submodule changes and normal FRR recipe patch commits are preserved;
+source diff, component pins and runtime config are exported with the artifact.
+
+Attempt 4 failed because Makefile.work capped the slave nofile at 524288,
+although the Kubernetes pods/node already allowed 1048576. No host change needed.
+232086a4d introduces SONIC_BUILD_NOFILE ?= 1048576 for Docker soft/hard limits
+and both build-user soft-limit commands; the comment now explains image assembly.
+Attempt 5 verified that nofile was fixed, then failed at docker.sh line 111:
+its chroot requested unlimited nproc above inherited hard limit 514289.
+Cluster-Janitor reproduced this through the ASK/ANSWER file handshake and advised
+setting nproc at container creation. 9f6b40c0f adds --ulimit nproc=-1:-1.
+No new capabilities or product docker.sh changes were needed. Attempt 6's actual
+make process had nofile 1048576/1048576 and nproc unlimited/unlimited, and the
+chroot Docker daemon started successfully.
+
+RUNTIME / REPRODUCTION
+Context admin@aquinas, namespace sonic-build, pod sonic-builder, node k8s-1.
+Persistent 500 GiB PVC at /work; checkout /work/src/sonic-buildimage.
+Run as builder using bash /work/build-marvell-image.sh, which executes:
+  BLDENV=trixie make NOBOOKWORM=1 SONIC_BUILD_JOBS=2 SONIC_CONFIG_MAKE_JOBS=2 target/sonic-marvell-teralynx.bin
+Never start a second make in the same checkout/daemon. The sonic-image-builder
+pod remains available but its emptyDir is not durable; attempt 6 used sonic-builder.
+Toolchain: sonic-slave-trixie:727c90ef0e2; unchanged Dockerfile/toolchain hash.
+Native pod Docker daemon, overlay2, bridge MTU 1450. This run enabled the
+container terminal with stdin off; those flags do not fix recipe-level Tcl tests
+and have since been removed from the helper (see the verification note below).
+Pod limits 4 CPU / 16 GiB, request 2 CPU; rules/config.user sets slave memory 12g.
+Docker cgroup parent is the pod cgroup. No pod recreation or host-limit changes.
+
+EXPORTED EVIDENCE (local, untracked binary/recovery material)
+Workspace: /home/bluecmd/sonic-buildimage.
+  build-support/artifacts/marvell-20261020/sonic-marvell-teralynx.bin
+  Same directory: SHA256SUMS, integrity.json, contents.json, sonic_version.yml,
+    build-result.txt and source.txt.
+  build-support/validation/marvell-image-attempt6.log, -installer.log,
+    -limits.txt, -result.txt, -source.txt, -integrity.json, -contents.json.
+  Attempt 5 logs and nofile proof remain in the same validation directory.
+  build-support/verify-installer.py and verify-installer-contents.py.
+  build-support/ASK-CLUSTER-JANITOR.md and ANSWER-CLUSTER-JANITOR.md.
+Pod logs: /work/logs/marvell-image.{log,started,finished,exit}; attempts 4/5
+are separately archived there. Verifier scripts/reports also remain under /work.
+Run the verifiers in the saved slave image with TMPDIR=/work (requires Python
+3.11+ for hashlib.file_digest; pod Ubuntu Python 3.10 is too old).
+
+VERIFIED RESULTS
+- Exact SONiC Linux 6.12.41 kernel, headers and kbuild: cold 1h9m. Removed header
+  restored from normal cache in 24s with matching checksums (not full-image speed).
+- Silverstone/Midstone packages built against exact SONiC ABI; all nine Silverstone
+  kernel modules have matching vermagic. No hardware boot or module load performed.
+- Host services: 883 tests pass. SWSS: 2409 pass, 4 skip. YANG models: 995 pass.
+- Libnl namespace checks pass. Libyang's normal recipe reports 63 passing CTest
+  entries, but yanglint_interactive executes zero tests with 18 file-level stdout
+  errors. Package logging detaches recipes from the container terminal, so Docker
+  --tty cannot fix this. This supersedes earlier terminal-based pass claims.
+  During the Broadcom run, a separate read-only copy of the built libyang tree
+  under script -qec 'ctest -R yanglint_interactive -V' /dev/null ran 108 tests:
+  108 passed, zero failed/skipped, with one residual file-level error in add.test.
+  The residual harness error remains unexplained; do not claim all files passed.
+  Cluster-Janitor reproduced both signatures without touching the running build.
+  Evidence: build-support/validation/broadcom-image-attempt1-libyang{,-pty}.log.
+- Eventd normal full-build package: all 23 tests pass, including re-enabled proxy.
+- BGP configuration: 2793 tests pass. Link-manager: 190 tests pass.
+- P4 runtime: package succeeds, all 58 Bazel test targets pass; cold recipe 1h42m10s.
+- FRR, OR-Tools, DASH HA, gNMI, management-framework and syncd packages succeed.
+  Syncd compiled test sources but no runtime test summary was found: do not claim
+  its unit tests executed based solely on compilation.
+- Previously completed/cached container images include configuration-engine, SWSS layer,
+  database, eventd, BMP/watchdog, gNMI/sidecar/watchdog, LLDP, mux, orchagent,
+  OpenTelemetry and P4 runtime. Attempt 6 completed the full image.
+- DVS and hardware validation remain outstanding.
+
+
+NEXT STEPS / LIMITATIONS
+Keep this PR draft pending DVS and hardware boot/module-load validation.
+Broadcom, Mellanox and required Bookworm images remain unvalidated.
+Optional warm timing can follow; do not call attempt 6 a clean timing comparison.
+Do not change the slave Dockerfile/toolchain hash just to retry an image target.
+Do not reintroduce the reverted gNMI Go trailer patch: its newer x/net handles it.
+Management-framework retains its separate required vendored gRPC compatibility fix.
+If cluster, storage, registry or another unexpected build blocker occurs, write
+build-support/ASK-CLUSTER-JANITOR.md and poll ANSWER-CLUSTER-JANITOR.md every 30s
+for up to 20 minutes before stopping or choosing a workaround.
+
+OLDER RECOVERY MATERIAL
+Original local recovery workspace:
+/home/bluecmd/Documents/Codex/2026-10-18-your-project-is-to-lift-the/build-support.
+It contains WORK_STATE.txt, package/test logs, kernel/platform packages, root and
+component bundles, and cache/sonic-slave-trixie-727c90ef0e2.tar.gz (3.4 GiB), SHA256
+63135cae80d177dfa64c90307336840d4f13e3421c4f8d6ebb94d7667f18f5de.
+/work/recovery/sonic-buildimage-latest.bundle preserves source through 41d1fd836.

@@ -28,11 +28,12 @@ DEPENDS := $(shell find scripts hooks debian -type f)
 $(SONIC_BUILD_HOOKS_TARGET): $(DEPENDS)
 	@rm -rf $(BUILDINFO_DIR)/$(SONIC_BUILD_HOOKS) $(TMP_DIR)
 	@mkdir -p $(DEBIAN_DIR) $(SCRIPTS_PATH) $(HOOKS_PATH) $(SYMBOL_LINK_PATH) $(TRUSTED_GPG_PATH) $(BUILDINFO_DIR)
-	@chmod 0775 $(DEBIAN_DIR)
+	# Clear inherited setgid bits on group-writable Kubernetes volumes.
+	@chmod 00775 $(DEBIAN_DIR)
 	@cp debian/* $(DEBIAN_DIR)/
 	@cp scripts/* $(SCRIPTS_PATH)/
 	@cp hooks/* $(HOOKS_PATH)/
-	@for url in $$(echo $(TRUSTED_GPG_URLS) | sed 's/[,;]/ /g'); do wget -q "$$url" -P "$(TRUSTED_GPG_PATH)/"; done
+	@set -e; for url in $$(echo $(TRUSTED_GPG_URLS) | sed 's/[,;]/ /g'); do wget -q "$$url" -P "$(TRUSTED_GPG_PATH)/"; done
 	@for f in $(SYMBOL_LINKS); do ln -s $(SYMBOL_LINKS_SRC_DIR)/$$f $(SYMBOL_LINK_PATH)/$$f; done
 	@$(BUILD_COMMAND)
 

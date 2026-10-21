@@ -9,11 +9,8 @@
 try:
     import time
     from sonic_platform_pddf_base.pddf_chassis import PddfChassis
-    from sonic_py_common import device_info
 except ImportError as e:
     raise ImportError(str(e) + "- required module not found")
-
-NUM_COMPONENT = 2
 
 class Chassis(PddfChassis):
     """
@@ -24,13 +21,6 @@ class Chassis(PddfChassis):
 
     def __init__(self, pddf_data=None, pddf_plugin_data=None):
         PddfChassis.__init__(self, pddf_data, pddf_plugin_data)
-        self._initialize_components()
-
-    def _initialize_components(self):
-        from sonic_platform.component import Component
-        for index in range(NUM_COMPONENT):
-            component = Component(index)
-            self._component_list.append(component)
             
     # Provide the functions/variables below for which implementation is to be overwritten
     def get_name(self):
@@ -39,7 +29,7 @@ class Chassis(PddfChassis):
         Returns:
             string: The name of the chassis
         """
-        return device_info.get_platform()
+        return self._eeprom.platform_name_str()
 
     def initizalize_system_led(self):
         return True
@@ -175,26 +165,7 @@ class Chassis(PddfChassis):
         except IndexError:
             sys.stderr.write("SFP index {} out of range (1-{})\n".format(
                              index, len(self._sfp_list)))
-        return sfp
-
-    def set_system_led(self, led_device_name, color):
-        """
-        Sets the color of an System LED device
-        Args:
-           led_device_name: a pre-defined LED device name list used in pddf-device.json.
-           color: A string representing the color with which to set a LED
-        Returns:
-           bool: True if the LED state is set successfully, False if not
-        """
-
-        if led_device_name in self.plugin_data['LED']['capability']['rw']:
-            result, msg  = self.pddf_obj.set_system_led_color(led_device_name, color)
-            if not result and msg:
-                print(msg)
-            return (result)
-        else:
-            print("Not Support")
-            return False            
+        return sfp        
 
     def get_reboot_cause(self):
         """
@@ -218,3 +189,14 @@ class Chassis(PddfChassis):
             sw_reboot_cause = "Unknown"
 
         return ('REBOOT_CAUSE_NON_HARDWARE', sw_reboot_cause)
+
+    def get_serial_number(self):
+        """
+        Retrieves the hardware serial number for the chassis
+
+        Returns:
+            A string containing the hardware serial number for this
+            chassis.
+        """
+
+        return self.get_serial()

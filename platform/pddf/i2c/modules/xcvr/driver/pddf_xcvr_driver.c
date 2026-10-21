@@ -85,20 +85,27 @@ static struct sensor_device_attribute *xcvr_attr_list[MAX_XCVR_ATTRS] = {
     &sensor_dev_attr_xcvr_txfault,
 };
 
-static struct attribute *xcvr_attributes[MAX_XCVR_ATTRS] = {NULL};
 
-static const struct attribute_group xcvr_group = {
-    .attrs = xcvr_attributes,
+enum xcvr_intf 
+{
+    XCVR_CTRL_INTF,
 };
 
-static int xcvr_probe(struct i2c_client *client,
-            const struct i2c_device_id *dev_id)
+static const struct i2c_device_id xcvr_ids[] = {
+    { "pddf_xcvr", XCVR_CTRL_INTF },
+    {}
+};
+
+MODULE_DEVICE_TABLE(i2c, xcvr_ids);
+
+static int xcvr_probe(struct i2c_client *client)
 {
     struct xcvr_data *data;
     int status =0;
     int i,j,num;
     XCVR_PDATA *xcvr_platform_data;
     XCVR_ATTR *attr_data;
+    struct i2c_device_id *dev_id;
 
     if (client == NULL) {
         pddf_dbg(XCVR, "NULL Client.. \n");
@@ -107,6 +114,7 @@ static int xcvr_probe(struct i2c_client *client,
 
     if (pddf_xcvr_ops.pre_probe)
     {
+        dev_id = i2c_match_id(xcvr_ids, client);
         status = (pddf_xcvr_ops.pre_probe)(client, dev_id);
         if (status != 0)
             goto exit;
@@ -148,18 +156,19 @@ static int xcvr_probe(struct i2c_client *client,
         }
         
         if (j<XCVR_ATTR_MAX)
-            xcvr_attributes[i] = &xcvr_attr_list[j]->dev_attr.attr;
+            data->attributes[i] = &xcvr_attr_list[j]->dev_attr.attr;
 
     }
-    xcvr_attributes[i] = NULL;
+    data->attributes[i] = NULL;
+    data->attribute_group.attrs = data->attributes;
 
     /* Register sysfs hooks */
-    status = sysfs_create_group(&client->dev.kobj, &xcvr_group);
+    status = sysfs_create_group(&client->dev.kobj, &data->attribute_group);
     if (status) {
         goto exit_free;
     }
 
-    data->xdev = hwmon_device_register_with_info(&client->dev, client->name, NULL, NULL, NULL);
+    data->xdev = hwmon_device_register_with_groups(&client->dev, client->name, NULL, NULL);
     if (IS_ERR(data->xdev)) {
         status = PTR_ERR(data->xdev);
         goto exit_remove;
@@ -171,6 +180,7 @@ static int xcvr_probe(struct i2c_client *client,
     /* Add a support for post probe function */
     if (pddf_xcvr_ops.post_probe)
     {
+        dev_id = i2c_match_id(xcvr_ids, client);
         status = (pddf_xcvr_ops.post_probe)(client, dev_id);
         if (status != 0)
             goto exit_remove;
@@ -181,7 +191,7 @@ static int xcvr_probe(struct i2c_client *client,
 
 
 exit_remove:
-    sysfs_remove_group(&client->dev.kobj, &xcvr_group);
+    sysfs_remove_group(&client->dev.kobj, &data->attribute_group);
 exit_free:
     kfree(data);
 exit:
@@ -193,8 +203,6 @@ static void xcvr_remove(struct i2c_client *client)
 {
     int ret = 0;
     struct xcvr_data *data = i2c_get_clientdata(client);
-    XCVR_PDATA *platdata = (XCVR_PDATA *)client->dev.platform_data;
-    XCVR_ATTR *platdata_sub = platdata->xcvr_attrs;
 
     if (pddf_xcvr_ops.pre_remove)
     {
@@ -204,17 +212,9 @@ static void xcvr_remove(struct i2c_client *client)
     }
 
     hwmon_device_unregister(data->xdev);
-    sysfs_remove_group(&client->dev.kobj, &xcvr_group);
+    sysfs_remove_group(&client->dev.kobj, &data->attribute_group);
     kfree(data);
 
-    if (platdata_sub) {
-        pddf_dbg(XCVR, KERN_DEBUG "%s: Freeing platform subdata\n", __FUNCTION__);
-        kfree(platdata_sub);
-    }
-    if (platdata) {
-        pddf_dbg(XCVR, KERN_DEBUG "%s: Freeing platform data\n", __FUNCTION__);
-        kfree(platdata);
-    }
     
     if (pddf_xcvr_ops.post_remove)
     {
@@ -223,18 +223,6 @@ static void xcvr_remove(struct i2c_client *client)
             printk(KERN_ERR "FAN post_remove function failed\n");
     }
 }
-
-enum xcvr_intf 
-{
-    XCVR_CTRL_INTF,
-};
-
-static const struct i2c_device_id xcvr_ids[] = {
-    { "pddf_xcvr", XCVR_CTRL_INTF },
-    {}
-};
-
-MODULE_DEVICE_TABLE(i2c, xcvr_ids);
 
 static struct i2c_driver xcvr_driver = {
     /*.class        = I2C_CLASS_HWMON,*/

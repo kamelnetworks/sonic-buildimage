@@ -5,6 +5,7 @@
         "num_fans_pertray": 1,
         "num_ports": 56,
         "num_temps": 5,
+        "num_components": 4,
         "pddf_dev_types": {
             "description": "PDDF supported devices",
             "CPLD": [
@@ -24,16 +25,18 @@
                 "pddf_xcvr"
             ]
         },
+        "std_perm_kos": [
+            "i2c-i801",
+            "i2c-ismt"
+        ],
         "std_kos": [
-            "i2c_i801",
-            "i2c-ismt",
             "i2c_dev",
             "i2c_mux_pca954x",
             "optoe",
             "lm75",
             "gpio-pca953x",
             "ucd9000",
-            "eeprom"
+            "at24"
         ],
         "pddf_kos": [
             "pddf_client_module",
@@ -41,9 +44,12 @@
             "pddf_cpld_driver",
             "pddf_mux_module",
             "pddf_xcvr_module",
+            "pddf_fpgapci_driver",
             "pddf_xcvr_driver_module",
             "pddf_psu_driver_module",
             "pddf_psu_module",
+            "pddf_fpgai2c_module",
+            "pddf_fpgai2c_driver",
             "pddf_fan_driver_module",
             "pddf_fan_module",
             "pddf_led_module",
@@ -51,7 +57,40 @@
         ],
         "custom_kos": [
             "x86-64-ufispace-s6301-56st-lpc",
-            "x86-64-ufispace-s6301-56st-sys-eeprom"
+            "x86-64-ufispace-s6301-56st-sys-eeprom",
+            "pddf_custom_psu"
+        ]
+    },
+    "COMPONENT1":
+    {
+        "comp_attr":{ "name": "CPLD1", "type": "cpld", "description": "CPLD 1"},
+        "attr_list":
+        [
+            { "attr_name":"version", "get_cmd": "cat /sys/devices/platform/x86_64_ufispace_s6301_56st_lpc/mb_cpld/mb_cpld_1_version_h" }
+        ]
+    },
+    "COMPONENT2":
+    {
+        "comp_attr":{ "name": "BIOS", "type": "bios", "description": "Basic Input/Output System"},
+        "attr_list":
+        [
+            { "attr_name":"version", "get_cmd": "cat /sys/class/dmi/id/bios_version" }
+        ]
+    },
+    "COMPONENT3":
+    {
+        "comp_attr":{ "name": "PCIe", "type": "pcie", "description":"ASIC PCIe Firmware"},
+        "attr_list":
+        [
+            { "attr_name":"version", "get_cmd": "bcmcmd 'pciephy fw version' | grep 'PCIe FW version' | cut -d ' ' -f 4" }
+        ]
+    },
+    "COMPONENT4":
+    {
+        "comp_attr":{ "name": "PCIe Loader", "type": "pcie", "description":"ASIC PCIe Firmware Loader"},
+        "attr_list":
+        [
+            { "attr_name":"version", "get_cmd": "bcmcmd 'pciephy fw version' | grep 'PCIe FW loader version' | cut -d ' ' -f 5" }
         ]
     },
     "SYSTEM": {
@@ -75,7 +114,7 @@
     },
     "SMBUS1": {
         "dev_info": {
-            "device_type": "SMBUS", "device_name": "SMBUS1", "device_parent": "SYSTEM" 
+            "device_type": "SMBUS", "device_name": "SMBUS1", "device_parent": "SYSTEM"
         },
         "i2c": {
             "topo_info": {
@@ -96,7 +135,7 @@
                 },
                 {
                     "dev": "FAN-CTRL"
-                }                
+                }
             ]
         }
     },
@@ -320,7 +359,7 @@
                 }
             ]
         }
-    },   
+    },
     "GPIO2": {
         "dev_info": {
             "device_type": "GPIO",
@@ -657,7 +696,7 @@
                 }
             ]
         }
-    }, 
+    },
     "CPLD1": {
         "dev_info": {
             "device_type": "CPLD",
@@ -845,7 +884,7 @@
                 }
             ]
         }
-    },    
+    },
     "PSU1": {
         "dev_info": {
             "device_type": "PSU",
@@ -861,6 +900,18 @@
                 { "itf":"pmbus", "dev":"PSU1-PMBUS" },
                 { "itf":"eeprom", "dev":"PSU1-EEPROM" }
             ]
+        },
+        "bmc": {
+            "ipmitool": {
+                "attr_list": [
+                    {
+                        "attr_name": "psu_present",
+                        "bmc_cmd": "[ -n \"$(cat /sys/bus/i2c/devices/2-0058/psu_mfr_id | tr -d '\n')\" ] && echo '1' || echo '0'",
+                        "raw": "1",
+                        "type": "raw"
+                    }
+                ]
+            }
         }
     },
     "PSU1-PMBUS": {
@@ -877,16 +928,6 @@
                 "dev_type": "psu_pmbus"
             },
             "attr_list": [
-                {
-                    "attr_name": "psu_present",
-                    "attr_devaddr":"0x33",
-                    "attr_devtype": "cpld",
-                    "attr_devname":"CPLD1",
-                    "attr_offset": "0x59",
-                    "attr_mask": "0x1",
-                    "attr_cmpval": "0x0",
-                    "attr_len": "1"
-                },
                 {
                     "attr_name": "psu_power_good",
                     "attr_devaddr": "0x33",
@@ -941,12 +982,30 @@
                     "attr_mask": "0x0",
                     "attr_cmpval": "0xff",
                     "attr_len": "2"
-                },                
+                },
                 {
                     "attr_name": "psu_v_out",
                     "attr_devaddr": "0x58",
                     "attr_devtype": "pmbus",
                     "attr_offset": "0x8b",
+                    "attr_mask": "0x0",
+                    "attr_cmpval": "0xff",
+                    "attr_len": "2"
+                },
+                {
+                    "attr_name": "psu_v_out_min",
+                    "attr_devaddr": "0x58",
+                    "attr_devtype": "pmbus",
+                    "attr_offset": "0xa4",
+                    "attr_mask": "0x0",
+                    "attr_cmpval": "0xff",
+                    "attr_len": "2"
+                },
+                {
+                    "attr_name": "psu_v_out_max",
+                    "attr_devaddr": "0x58",
+                    "attr_devtype": "pmbus",
+                    "attr_offset": "0xa5",
                     "attr_mask": "0x0",
                     "attr_cmpval": "0xff",
                     "attr_len": "2"
@@ -965,6 +1024,15 @@
                     "attr_devaddr": "0x58",
                     "attr_devtype": "pmbus",
                     "attr_offset": "0x96",
+                    "attr_mask": "0x0",
+                    "attr_cmpval": "0xff",
+                    "attr_len": "2"
+                },
+                {
+                    "attr_name": "psu_p_out_max",
+                    "attr_devaddr": "0x58",
+                    "attr_devtype": "pmbus",
+                    "attr_offset": "0xa7",
                     "attr_mask": "0x0",
                     "attr_cmpval": "0xff",
                     "attr_len": "2"
@@ -992,7 +1060,7 @@
     },
     "PSU1-EEPROM":
     {
-        "dev_info": { 
+        "dev_info": {
             "device_type":"",
             "device_name":"PSU1-EEPROM",
             "device_parent":"MUX1",
@@ -1000,17 +1068,17 @@
         },
         "i2c":
         {
-            "topo_info":{ 
+            "topo_info":{
                 "parent_bus":"0x2",
                 "dev_addr":"0x50",
-                "dev_type":"eeprom"
-            }, 
-            "attr_list": 
-            [  
+                "dev_type":"24c02"
+            },
+            "attr_list":
+            [
                 { "attr_name":"eeprom" }
             ]
         }
-    },    
+    },
     "PSU2": {
         "dev_info": {
             "device_type": "PSU",
@@ -1026,6 +1094,18 @@
                 { "itf":"pmbus", "dev":"PSU2-PMBUS" },
                 { "itf":"eeprom", "dev":"PSU2-EEPROM" }
             ]
+        },
+        "bmc": {
+            "ipmitool": {
+                "attr_list": [
+                    {
+                        "attr_name": "psu_present",
+                        "bmc_cmd": "[ -n \"$(cat /sys/bus/i2c/devices/2-0059/psu_mfr_id | tr -d '\n')\" ] && echo '1' || echo '0'",
+                        "raw": "1",
+                        "type": "raw"
+                    }
+                ]
+            }
         }
     },
     "PSU2-PMBUS": {
@@ -1042,16 +1122,6 @@
                 "dev_type": "psu_pmbus"
             },
             "attr_list": [
-                {
-                    "attr_name": "psu_present",
-                    "attr_devaddr":"0x33",
-                    "attr_devtype": "cpld",
-                    "attr_devname":"CPLD1",
-                    "attr_offset": "0x59",
-                    "attr_mask": "0x2",
-                    "attr_cmpval": "0x0",
-                    "attr_len": "1"
-                },
                 {
                     "attr_name": "psu_power_good",
                     "attr_devaddr": "0x33",
@@ -1106,12 +1176,30 @@
                     "attr_mask": "0x0",
                     "attr_cmpval": "0xff",
                     "attr_len": "2"
-                },                
+                },
                 {
                     "attr_name": "psu_v_out",
                     "attr_devaddr": "0x59",
                     "attr_devtype": "pmbus",
                     "attr_offset": "0x8b",
+                    "attr_mask": "0x0",
+                    "attr_cmpval": "0xff",
+                    "attr_len": "2"
+                },
+                {
+                    "attr_name": "psu_v_out_min",
+                    "attr_devaddr": "0x59",
+                    "attr_devtype": "pmbus",
+                    "attr_offset": "0xa4",
+                    "attr_mask": "0x0",
+                    "attr_cmpval": "0xff",
+                    "attr_len": "2"
+                },
+                {
+                    "attr_name": "psu_v_out_max",
+                    "attr_devaddr": "0x59",
+                    "attr_devtype": "pmbus",
+                    "attr_offset": "0xa5",
                     "attr_mask": "0x0",
                     "attr_cmpval": "0xff",
                     "attr_len": "2"
@@ -1130,6 +1218,15 @@
                     "attr_devaddr": "0x59",
                     "attr_devtype": "pmbus",
                     "attr_offset": "0x96",
+                    "attr_mask": "0x0",
+                    "attr_cmpval": "0xff",
+                    "attr_len": "2"
+                },
+                {
+                    "attr_name": "psu_p_out_max",
+                    "attr_devaddr": "0x59",
+                    "attr_devtype": "pmbus",
+                    "attr_offset": "0xa7",
                     "attr_mask": "0x0",
                     "attr_cmpval": "0xff",
                     "attr_len": "2"
@@ -1154,10 +1251,10 @@
                 }
             ]
         }
-    },    
+    },
     "PSU2-EEPROM":
     {
-        "dev_info": { 
+        "dev_info": {
             "device_type":"",
             "device_name":"PSU2-EEPROM",
             "device_parent":"MUX1",
@@ -1165,17 +1262,17 @@
         },
         "i2c":
         {
-            "topo_info":{ 
+            "topo_info":{
                 "parent_bus":"0x2",
                 "dev_addr":"0x51",
-                "dev_type":"eeprom"
-            }, 
-            "attr_list": 
-            [  
+                "dev_type":"24c02"
+            },
+            "attr_list":
+            [
                 { "attr_name":"eeprom" }
             ]
         }
-    }, 
+    },
     "FAN-CTRL": {
         "dev_info": {
             "device_type": "FAN",
@@ -1232,14 +1329,15 @@
                 }
             ]
         }
-    },                                                         
+    },
     "SYS_LED": {
         "dev_info": {
             "device_type": "LED",
             "device_name": "SYS_LED"
         },
         "dev_attr": {
-            "index": "0"
+            "index": "0",
+            "flag": "ro"
         },
         "i2c": {
             "attr_list": [
@@ -1286,13 +1384,14 @@
             ]
         }
     },
-    "ID_LED": {
+    "LOC_LED": {
         "dev_info": {
             "device_type": "LED",
             "device_name": "LOC_LED"
         },
         "dev_attr": {
-            "index": "0"
+            "index": "0",
+            "flag": "rw"
         },
         "i2c": {
             "attr_list": [
@@ -1329,7 +1428,8 @@
             "device_name": "FAN_LED"
         },
         "dev_attr": {
-            "index": "0"
+            "index": "0",
+            "flag": "ro"
         },
         "i2c": {
             "attr_list": [
@@ -1382,7 +1482,8 @@
             "device_name": "PSU_LED"
         },
         "dev_attr": {
-            "index": "1"
+            "index": "1",
+            "flag": "ro"
         },
         "i2c": {
             "attr_list": [
@@ -1435,7 +1536,8 @@
             "device_name": "PSU_LED"
         },
         "dev_attr": {
-            "index": "0"
+            "index": "0",
+            "flag": "ro"
         },
         "i2c": {
             "attr_list": [
@@ -1534,7 +1636,7 @@
         "i2c": {
             "topo_info": {
                 "parent_bus": "0xA",
-                "dev_addr": "0x54",
+                "dev_addr": "0x5f",
                 "dev_type": "pddf_xcvr"
             },
             "attr_list": [
@@ -1633,7 +1735,7 @@
         "i2c": {
             "topo_info": {
                 "parent_bus": "0xB",
-                "dev_addr": "0x54",
+                "dev_addr": "0x5f",
                 "dev_type": "pddf_xcvr"
             },
             "attr_list": [
@@ -1732,7 +1834,7 @@
         "i2c": {
             "topo_info": {
                 "parent_bus": "0xC",
-                "dev_addr": "0x54",
+                "dev_addr": "0x5f",
                 "dev_type": "pddf_xcvr"
             },
             "attr_list": [
@@ -1831,7 +1933,7 @@
         "i2c": {
             "topo_info": {
                 "parent_bus": "0xD",
-                "dev_addr": "0x54",
+                "dev_addr": "0x5f",
                 "dev_type": "pddf_xcvr"
             },
             "attr_list": [
@@ -1930,7 +2032,7 @@
         "i2c": {
             "topo_info": {
                 "parent_bus": "0xE",
-                "dev_addr": "0x54",
+                "dev_addr": "0x5f",
                 "dev_type": "pddf_xcvr"
             },
             "attr_list": [
@@ -2029,7 +2131,7 @@
         "i2c": {
             "topo_info": {
                 "parent_bus": "0xF",
-                "dev_addr": "0x54",
+                "dev_addr": "0x5f",
                 "dev_type": "pddf_xcvr"
             },
             "attr_list": [
@@ -2128,7 +2230,7 @@
         "i2c": {
             "topo_info": {
                 "parent_bus": "0x10",
-                "dev_addr": "0x54",
+                "dev_addr": "0x5f",
                 "dev_type": "pddf_xcvr"
             },
             "attr_list": [
@@ -2227,7 +2329,7 @@
         "i2c": {
             "topo_info": {
                 "parent_bus": "0x11",
-                "dev_addr": "0x54",
+                "dev_addr": "0x5f",
                 "dev_type": "pddf_xcvr"
             },
             "attr_list": [

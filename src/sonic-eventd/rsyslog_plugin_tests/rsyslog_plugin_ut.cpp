@@ -8,9 +8,10 @@ extern "C"
 #include <fstream>
 #include <memory>
 #include <regex>
+#include <thread>
+#include <swss/events.h>
 #include "gtest/gtest.h"
 #include <nlohmann/json.hpp>
-#include "events.h"
 #include "../rsyslog_plugin/rsyslog_plugin.h"
 #include "../rsyslog_plugin/syslog_parser.h"
 #include "../rsyslog_plugin/timestamp_formatter.h"
@@ -251,6 +252,31 @@ TEST(rsyslog_plugin, onMessage_noParams) {
     }
     lua_close(luaState);
     infile.close();
+}
+
+TEST(rsyslog_plugin, run) {
+    unique_ptr<RsyslogPlugin> plugin(new RsyslogPlugin("test_mod_name", "./rsyslog_plugin_tests/test_regex_5.rc.json"));
+    EXPECT_EQ(0, plugin->onInit());
+    istringstream ss("");
+    streambuf* cinbuf = cin.rdbuf();
+    cin.rdbuf(ss.rdbuf());
+    plugin->run();
+    cin.rdbuf(cinbuf);
+}
+
+TEST(rsyslog_plugin, run_SIGTERM) {
+    unique_ptr<RsyslogPlugin> plugin(new RsyslogPlugin("test_mod_name", "./rsyslog_plugin_tests/test_regex_5.rc.json"));
+    EXPECT_EQ(0, plugin->onInit());
+    EXPECT_TRUE(RsyslogPlugin::g_running);
+    thread pluginThread([&]() {
+        plugin->run();
+    });
+
+    RsyslogPlugin::signalHandler(SIGTERM);
+
+    pluginThread.join();
+
+    EXPECT_FALSE(RsyslogPlugin::g_running);
 }
 
 TEST(timestampFormatter, changeTimestampFormat) {

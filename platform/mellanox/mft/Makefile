@@ -1,5 +1,6 @@
 #
-# Copyright (c) 2016-2023 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: NVIDIA CORPORATION & AFFILIATES
+# Copyright (c) 2016-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -42,27 +43,13 @@ DERIVED_TARGETS = mft-oem_$(MFT_VERSION)-$(MFT_REVISION)_$(CONFIGURED_ARCH).deb
 DKMS_CTRL = /var/lib/dkms/kernel-mft-dkms/
 DKMS_TMP := $(shell mktemp -u -d -t dkms.XXXXXXXXXX)
 
-MFT_DEB_TMP := $(shell mktemp -u -d -t mft.deb.XXXXXXXXXX)
-MFT_TMP := $(shell mktemp -u -d -t mft.XXXXXXXXXX)
+MFT_TMP = /tmp/mft_build/
 
 $(addprefix $(DEST)/, $(MAIN_TARGET)): $(DEST)/% :
 	mkdir -p $(MFT_TMP)
 	pushd $(MFT_TMP)
 	wget -O $(MFT_TGZ) $(MFT_TGZ_URL)
 	tar xzf $(MFT_TGZ)
-
-	# w/a: disable bash autocompletion
-	mkdir -p $(MFT_DEB_TMP)/DEBIAN
-
-	dpkg -e $(MFT_NAME)/DEBS/$(MAIN_TARGET) $(MFT_DEB_TMP)/DEBIAN
-	dpkg -x $(MFT_NAME)/DEBS/$(MAIN_TARGET) $(MFT_DEB_TMP)
-
-	rm -rf $(MFT_DEB_TMP)/etc/bash_completion.d
-	sed -i '/bash_completion.d/d' $(MFT_DEB_TMP)/DEBIAN/conffiles
-
-	dpkg -b $(MFT_DEB_TMP) $(MFT_NAME)/DEBS/$(MAIN_TARGET)
-
-	rm -rf $(MFT_DEB_TMP)
 
 	# fix timestamp
 	touch $(MFT_NAME)/DEBS/*.deb
@@ -91,15 +78,15 @@ $(addprefix $(DEST)/, $(KERNEL_MFT_TARGET)): $(DEST)/% :
 	pushd $(MFT_NAME)/SDEBS
 
 	# put a lock here because dpkg does not allow installing packages in parallel
-	while true; do
-	if mkdir $(DEST)/dpkg_lock &> /dev/null; then
-	{ sudo dpkg -i $(SRC_DEB) && rm -d $(DEST)/dpkg_lock && break; } || { rm -d $(DEST)/dpkg_lock && exit 1 ; }
-	fi
-	done
+	flock $(DEST)/dpkg_lock.lk sudo dpkg -i $(SRC_DEB)
 
 	popd
 
-	sudo dkms build kernel-mft-dkms/$(MFT_VERSION) -k $(KVERSION) -a $(CONFIGURED_ARCH)
+	if [ -d /usr/src/kernel-mft-dkms-$(MFT_VERSION).$(MFT_REVISION) ]; then
+		sudo dkms build kernel-mft-dkms/$(MFT_VERSION).$(MFT_REVISION) -k $(KVERSION) -a $(CONFIGURED_ARCH)
+	else
+		sudo dkms build kernel-mft-dkms/$(MFT_VERSION) -k $(KVERSION) -a $(CONFIGURED_ARCH)
+	fi
 
 	# copy the built modules
 	cp -r $(DKMS_CTRL)/kernel-$(KVERSION)-$(CONFIGURED_ARCH)/module/*.ko \

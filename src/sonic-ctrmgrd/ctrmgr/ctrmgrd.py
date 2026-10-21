@@ -73,7 +73,7 @@ dflt_cfg_ser = {
         CFG_SER_IP: "",
         CFG_SER_PORT: "6443",
         CFG_SER_DISABLE: "false",
-        CFG_SER_INSECURE: "true"
+        CFG_SER_INSECURE: "false"
         }
 
 dflt_st_ser = {
@@ -489,7 +489,9 @@ class FeatureTransitionHandler:
         service_restart = False
 
         if set_owner == "local":
-            if ct_owner != "local":
+            # NOTE: no need to restart if the current owner is none,
+            # as none implies the container is not running.
+            if ct_owner != "local" and ct_owner != "none":
                 service_restart = True
         else:
             if (ct_owner != "none") and (remote_state == "pending"):
