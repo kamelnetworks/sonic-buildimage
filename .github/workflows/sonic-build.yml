@@ -162,6 +162,8 @@ jobs:
             curl -fsSL -o /tmp/gh.deb "https://github.com/cli/cli/releases/download/v${ver}/gh_${ver}_linux_amd64.deb"
             sudo dpkg -i /tmp/gh.deb
           fi
+          # GITHUB_PATH only affects later steps; j2 lives in ~/.local/bin.
+          export PATH="$HOME/.local/bin:$PATH"
           make --version | head -1
           j2 --version
           gh --version | head -1
@@ -276,7 +278,8 @@ jobs:
           make NOBOOKWORM=1 $BUILD_OPTS $TARGETS_INPUT
 
       - name: Check dirty version
-        if: ${{ !cancelled() }}
+        # Only meaningful after a build; skip when an earlier step failed.
+        if: ${{ success() }}
         run: |
           source functions.sh
           sonic_version=$(sonic_get_version)
