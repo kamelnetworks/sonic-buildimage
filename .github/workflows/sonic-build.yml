@@ -253,6 +253,8 @@ jobs:
           echo "previous release tag: ${prev:-none}"
 
       - name: Create release
+        env:
+          PRERELEASE_FLAG: ${{ inputs.prerelease && '--prerelease' || '' }}
         run: |
           notes_body=$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
             -f tag_name="$TAG" \
@@ -263,9 +265,6 @@ jobs:
           cat release-notes.md
           # Tag the built commit; build-N increments monotonically with the
           # workflow run number.
-        env:
-          PRERELEASE_FLAG: ${{ inputs.prerelease && '--prerelease' || '' }}
-        run: |
           gh release create "$TAG" \
             --target "$GITHUB_SHA" \
             --title "${BRANCH}-v${GITHUB_RUN_NUMBER}" \
