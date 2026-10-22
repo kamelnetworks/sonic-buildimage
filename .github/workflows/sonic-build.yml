@@ -139,8 +139,35 @@ jobs:
           df -h "$GITHUB_WORKSPACE"
           echo "docker root: $(docker info -f '{{.DockerRootDir}}')"
 
+      - name: Bootstrap host tools (make/j2/gh are not in the runner image)
+        # The actions-runner image ships docker (dind socket) but not the
+        # build toolchain; install what the build system needs on the host.
+        run: |
+          missing=''
+          command -v make >/dev/null || missing="$missing make"
+          command -v pip3 >/dev/null || missing="$missing python3-pip"
+          if [[ -n "$missing" ]]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq $missing
+          fi
+          if ! command -v j2 >/dev/null; then
+            # j2 (jinjanator) renders the Dockerfile.j2 templates on the host;
+            # the Azure agents had it preinstalled, the runner image does not.
+            pip3 install --user --break-system-packages jinjanator
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          fi
+          if ! command -v gh >/dev/null; then
+            ver=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"][1:])')
+            echo "installing gh $ver"
+            curl -fsSL -o /tmp/gh.deb "https://github.com/cli/cli/releases/download/v${ver}/gh_${ver}_linux_amd64.deb"
+            sudo dpkg -i /tmp/gh.deb
+          fi
+          make --version | head -1
+          j2 --version
+          gh --version | head -1
+
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: 'recursive'
@@ -276,7 +303,7 @@ jobs:
           TARGETS_INPUT: ${{ inputs.targets }}
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:
           name: sonic-buildimage.${{ matrix.platform }}
@@ -293,18 +320,23 @@ jobs:
       PLATFORMS_INPUT: ${{ inputs.platforms }}
       PRERELEASE_FLAG: ${{ inputs.prerelease && '--prerelease' || '' }}
     steps:
-      - name: Verify dependencies
+      - name: Verify dependencies (release job)
         run: |
-          command -v gh
+          command -v gh >/dev/null || {
+            ver=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"][1:])')
+            echo "installing gh $ver"
+            curl -fsSL -o /tmp/gh.deb "https://github.com/cli/cli/releases/download/v${ver}/gh_${ver}_linux_amd64.deb"
+            sudo dpkg -i /tmp/gh.deb
+          }
           gh --version
 
       - name: Checkout (for tagging the built commit)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           # No merge-multiple: each artifact lands in its own
           # sonic-buildimage.<platform>/ directory, which the rename step keys on.
