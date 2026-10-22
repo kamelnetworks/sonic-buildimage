@@ -146,6 +146,7 @@ jobs:
           missing=''
           command -v make >/dev/null || missing="$missing make"
           command -v pip3 >/dev/null || missing="$missing python3-pip"
+          command -v wget >/dev/null || missing="$missing wget"
           if [[ -n "$missing" ]]; then
             sudo apt-get update -qq
             sudo apt-get install -y -qq $missing
