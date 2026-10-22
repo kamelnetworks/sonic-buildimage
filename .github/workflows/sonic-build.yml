@@ -192,6 +192,9 @@ jobs:
           cp -v target/sonic-${{ matrix.platform }}.bin* artifacts/ 2>/dev/null || true
           cp -v target/sonic-${{ matrix.platform }}-dbg.bin artifacts/ 2>/dev/null || true
           cp -v target/docker-*-dbg.gz artifacts/ 2>/dev/null || true
+          cp -v ${{ inputs.targets }} artifacts/ 2>/dev/null || true
+          # Keep the artifact non-empty for component-target builds.
+          touch artifacts/.build-info && echo "platform=${{ matrix.platform }} targets='${{ inputs.targets }}'" > artifacts/.build-info
           ls -lh artifacts/ | head -60
 
       - name: Upload build artifacts
