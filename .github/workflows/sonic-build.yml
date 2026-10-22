@@ -174,9 +174,19 @@ jobs:
 
       - name: Verify dependencies
         run: |
-          which j2
           which make
+          which python3
           docker info
+          # j2 (jinjanator) renders the Dockerfile.j2 templates on the host;
+          # the Azure agents had it preinstalled, the runner image does not.
+          if ! command -v j2 >/dev/null; then
+            pip3 install --user jinjanator \
+              || sudo pip3 install --break-system-packages jinjanator
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          fi
+          export PATH="$HOME/.local/bin:$PATH"
+          which j2
+          j2 --version
 
       - name: Compute build options
         env:
