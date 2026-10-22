@@ -181,6 +181,36 @@ jobs:
           docker run --rm alpine:3.20 sh -c 'echo hello from nested container'
           docker run --rm -v "$GITHUB_WORKSPACE:/probe" alpine:3.20 sh -c 'test -f /probe/Makefile.work && echo "dind sees the workspace"'
 
+      - name: Probe dind build egress (temporary diagnosis for apt failures)
+        # Pin down why apt inside `docker build` (buildkit) cannot reach the
+        # debian snapshot mirror while `docker run` containers can. Non-fatal:
+        # log which network path fails, keep going.
+        run: |
+          ts=$(grep '^debian==' files/build/versions/default/versions-mirror | sed 's/.*==//')
+          snap="http://packages.trafficmanager.net/snapshot/debian/$ts"
+          mkdir -p /tmp/aptprobe && cd /tmp/aptprobe
+          printf 'deb %s trixie main\n' "$snap" > sources.list
+          cat > Dockerfile <<'EOF'
+          FROM debian:trixie
+          COPY sources.list /etc/apt/sources.list
+          RUN apt-get -o Acquire::Retries=1 update
+          EOF
+          echo "=== A: docker run + snapshot sources"
+          docker run --rm -v "$PWD/sources.list:/etc/apt/sources.list:ro" debian:trixie \
+            apt-get -o Acquire::Retries=1 update >/dev/null 2>&1 \
+            && echo A-pass || echo A-FAIL
+          echo "=== B: docker build (default network)"
+          docker build /tmp/aptprobe >/tmp/aptprobe-B.log 2>&1 \
+            && echo B-pass || { echo B-FAIL; grep -E 'Connection failed|Err:|E: ' /tmp/aptprobe-B.log | head -3; }
+          echo "=== C: docker build --network host"
+          docker build --network host /tmp/aptprobe >/tmp/aptprobe-C.log 2>&1 \
+            && echo C-pass || { echo C-FAIL; grep -E 'Connection failed|Err:|E: ' /tmp/aptprobe-C.log | head -3; }
+          echo "=== D: docker run + deb.debian.org (control)"
+          docker run --rm debian:trixie \
+            bash -c 'echo deb http://deb.debian.org/debian trixie main > /etc/apt/sources.list && apt-get -o Acquire::Retries=1 update' >/dev/null 2>&1 \
+            && echo D-pass || echo D-FAIL
+          cd - >/dev/null
+
       - name: Clean previous state (belt-and-braces; pods are ephemeral)
         run: |
           docker container prune -f || true
