@@ -248,7 +248,7 @@ jobs:
           echo "MATRIX_PLATFORM=$MATRIX_PLATFORM" >> "$GITHUB_ENV"
           # Component-target builds (targets override) configure for the
           # platform the targets belong to (docker-ptf.gz etc. are 'vs').
-          if [[ -n '$TARGETS_INPUT' ]]; then
+          if [[ -n "$TARGETS_INPUT" ]]; then
             echo "BUILD_PLATFORM=$TARGETS_PLATFORM_INPUT" >> "$GITHUB_ENV"
           else
             echo "BUILD_PLATFORM=$MATRIX_PLATFORM" >> "$GITHUB_ENV"
@@ -393,8 +393,10 @@ jobs:
           #   sonic-buildimage.<platform>/artifacts/docker-<name>-dbg.gz
           #     -> docker-<platform>-<name>-dbg.tar.gz
           mkdir assets
+          # upload-artifact puts files at the artifact root, so the parent
+          # dir is the artifact name: sonic-buildimage.<platform>
           find release-input -name 'docker-*-dbg.gz' -type f | while read -r f; do
-            dir=$(basename "$(dirname "$(dirname "$f")")")
+            dir=$(basename "$(dirname "$f")")
             case "$dir" in
               sonic-buildimage.*) platform=${dir#sonic-buildimage.} ;;
               *) echo "::error::unexpected artifact layout for $f (dir $dir)"; exit 1 ;;
@@ -454,12 +456,19 @@ jobs:
           printf 'Build version `SONiC.%s-kamel.%s-%s`\n\n%s\n' \
             "$BRANCH" "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" "$notes_body" > release-notes.md
           cat release-notes.md
-          # Rerun support: delete a previous release for the same tag first.
+          # Rerun support: delete a previous release for the same tag first
+          # (--cleanup-tag removes the tag too), re-tag the built commit, then
+          # create with --target/--verify-tag so a rerun never points the tag
+          # at a different commit than the artifacts were built from.
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "release $TAG already exists; recreating"
             gh release delete "$TAG" --yes --cleanup-tag
           fi
+          git tag -f "$TAG" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$TAG"
           gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --verify-tag \
             --title "${BRANCH}-v${GITHUB_RUN_NUMBER}" \
             --notes-file release-notes.md \
             ${PRERELEASE_FLAG}

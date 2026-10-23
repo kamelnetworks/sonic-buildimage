@@ -463,6 +463,11 @@ endif
 DOCKER_BUILD_NETWORK ?= default
 ifneq ($(strip $(DOCKER_BUILD_NETWORK)),default)
 DOCKER_BUILD_NETWORK_FLAG = --network $(DOCKER_BUILD_NETWORK)
+# Also propagate into the slave container so slave.mk's image builds
+# (DOCKER_BUILD_OPTS) join the same network, unless the caller set opts.
+ifeq ($(strip $(DOCKER_BUILD_OPTS)),)
+DOCKER_BUILD_OPTS = --network $(DOCKER_BUILD_NETWORK)
+endif
 endif
 
 DOCKER_RUN := docker run --rm=true $(DOCKER_PRIVMODE) $(DOCKER_BUILD_NETWORK_FLAG) --init \
