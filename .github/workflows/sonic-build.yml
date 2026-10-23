@@ -243,6 +243,13 @@ jobs:
           opts="USERNAME=admin"
           opts="$opts SONIC_VERSION_CONTROL_COMPONENTS=deb,py3,web,git,docker"
           opts="$opts DOCKER_BUILD_NETWORK=host"
+          # The docker lock dir is bind-mounted into the slave container. With
+          # DooD the dind sidecar resolves bind sources on its own filesystem,
+          # so the default /tmp/docklock (created 0777 on the runner) shows up
+          # as a root-owned 0755 dir in the slave and every docker image build
+          # fails with "touch: cannot touch '/tmp/docklock/..._access.lock':
+          # Permission denied". Keep it in the workspace, which both share.
+          opts="$opts DOCKER_LOCKDIR=$GITHUB_WORKSPACE/target/docklock"
           # host network: buildkit in the dind daemon only supports
           # default/host/none, and host puts every build container on the pod
           # netns (MTU 1450, no NAT hop) - the MTU-correct path.
