@@ -243,6 +243,11 @@ jobs:
           opts="USERNAME=admin"
           opts="$opts SONIC_VERSION_CONTROL_COMPONENTS=deb,py3,web,git,docker"
           opts="$opts DOCKER_BUILD_NETWORK=host"
+          # The docker save lock dir must live under the workspace: the dind
+          # daemon performs the bind mounts, and a job-container /tmp path is
+          # invisible to it (it would create /tmp/docklock as root in its own
+          # namespace and the slave's touch fails with Permission denied).
+          opts="$opts DOCKER_LOCKDIR=$PWD/.docklock"
           # host network: buildkit in the dind daemon only supports
           # default/host/none, and host puts every build container on the pod
           # netns (MTU 1450, no NAT hop) - the MTU-correct path.
@@ -261,6 +266,7 @@ jobs:
             echo "BUILD_PLATFORM=$MATRIX_PLATFORM" >> "$GITHUB_ENV"
           fi
           echo "build options: $opts"
+          mkdir -p "$PWD/.docklock"
 
       - name: Configure (rules/config.user)
         env:
