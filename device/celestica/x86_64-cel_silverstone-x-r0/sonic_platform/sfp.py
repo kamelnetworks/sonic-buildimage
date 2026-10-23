@@ -243,9 +243,9 @@ class Sfp(SfpOptoeBase):
         """
         Changes the driver based on media type detected
         """
-        del_sfp_path = "/sys/class/i2c-adapter/i2c-{0}/delete_device".format(self.index + SFP_I2C_START)
-        new_sfp_path = "/sys/class/i2c-adapter/i2c-{0}/new_device".format(self.index + SFP_I2C_START)
-        driver_path = "/sys/class/i2c-adapter/i2c-{0}/{0}-0050/name".format(self.index + SFP_I2C_START)
+        del_sfp_path = "/sys/bus/i2c/devices/i2c-{0}/delete_device".format(self.index + SFP_I2C_START)
+        new_sfp_path = "/sys/bus/i2c/devices/i2c-{0}/new_device".format(self.index + SFP_I2C_START)
+        driver_path = "/sys/bus/i2c/devices/{0}-0050/name".format(self.index + SFP_I2C_START)
         delete_device = "echo 0x50 >" + del_sfp_path
 
         if not os.path.isfile(driver_path):
