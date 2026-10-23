@@ -78,6 +78,10 @@ on:
         description: 'SONIC_DPKG_CACHE_SOURCE host directory (only used when cache_mode != none)'
         required: false
         default: ''
+      snapshot_url:
+        description: 'BUILD_SNAPSHOT_URL override (default packages.trafficmanager.net; use http://snapshot.debian.org/archive if the MS mirror flaps)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -181,36 +185,6 @@ jobs:
           docker run --rm alpine:3.20 sh -c 'echo hello from nested container'
           docker run --rm -v "$GITHUB_WORKSPACE:/probe" alpine:3.20 sh -c 'test -f /probe/Makefile.work && echo "dind sees the workspace"'
 
-      - name: Probe dind build egress (temporary diagnosis for apt failures)
-        # Pin down why apt inside `docker build` (buildkit) cannot reach the
-        # debian snapshot mirror while `docker run` containers can. Non-fatal:
-        # log which network path fails, keep going.
-        run: |
-          ts=$(grep '^debian==' files/build/versions/default/versions-mirror | sed 's/.*==//')
-          snap="http://packages.trafficmanager.net/snapshot/debian/$ts"
-          mkdir -p /tmp/aptprobe && cd /tmp/aptprobe
-          printf 'deb %s trixie main\n' "$snap" > sources.list
-          cat > Dockerfile <<'EOF'
-          FROM debian:trixie
-          COPY sources.list /etc/apt/sources.list
-          RUN apt-get -o Acquire::Retries=1 update
-          EOF
-          echo "=== A: docker run + snapshot sources"
-          docker run --rm -v "$PWD/sources.list:/etc/apt/sources.list:ro" debian:trixie \
-            apt-get -o Acquire::Retries=1 update >/dev/null 2>&1 \
-            && echo A-pass || echo A-FAIL
-          echo "=== B: docker build (default network)"
-          docker build /tmp/aptprobe >/tmp/aptprobe-B.log 2>&1 \
-            && echo B-pass || { echo B-FAIL; grep -E 'Connection failed|Err:|E: ' /tmp/aptprobe-B.log | head -3; }
-          echo "=== C: docker build --network host"
-          docker build --network host /tmp/aptprobe >/tmp/aptprobe-C.log 2>&1 \
-            && echo C-pass || { echo C-FAIL; grep -E 'Connection failed|Err:|E: ' /tmp/aptprobe-C.log | head -3; }
-          echo "=== D: docker run + deb.debian.org (control)"
-          docker run --rm debian:trixie \
-            bash -c 'echo deb http://deb.debian.org/debian trixie main > /etc/apt/sources.list && apt-get -o Acquire::Retries=1 update' >/dev/null 2>&1 \
-            && echo D-pass || echo D-FAIL
-          cd - >/dev/null
-
       - name: Clean previous state (belt-and-braces; pods are ephemeral)
         run: |
           docker container prune -f || true
@@ -268,6 +242,7 @@ jobs:
         env:
           CACHE_MODE_INPUT: ${{ inputs.cache_mode }}
           CACHE_SOURCE_INPUT: ${{ inputs.cache_source }}
+          SNAPSHOT_URL_INPUT: ${{ inputs.snapshot_url }}
         run: |
           # Do not overwrite an existing local configuration.
           if [[ -e rules/config.user ]]; then
@@ -281,11 +256,29 @@ jobs:
               if [[ -n "$CACHE_SOURCE_INPUT" ]]; then
                 echo "SONIC_DPKG_CACHE_SOURCE = $CACHE_SOURCE_INPUT"
               fi
+              if [[ -n "$SNAPSHOT_URL_INPUT" ]]; then
+                echo "BUILD_SNAPSHOT_URL = $SNAPSHOT_URL_INPUT"
+              fi
               echo 'SONIC_BUILD_MEMORY = 28g'
             } > rules/config.user
             cat rules/config.user
           fi
-          make NOBOOKWORM=1 configure PLATFORM=$MATRIX_PLATFORM PLATFORM_ARCH=amd64 $BUILD_OPTS
+          # The debian snapshot mirror (Azure Front Door) has bursty
+          # unavailability windows; the slave base image apt update fails
+          # when it is down even though deb.debian.org fallback is present
+          # (apt update exits nonzero on partial source failure). Retry
+          # configure: it is idempotent, and a flap usually clears in
+          # minutes. 3 attempts, 5 min apart.
+          attempt=1
+          until make NOBOOKWORM=1 configure PLATFORM=$MATRIX_PLATFORM PLATFORM_ARCH=amd64 $BUILD_OPTS; do
+            if (( attempt >= 3 )); then
+              echo '::error::configure failed after 3 attempts'
+              exit 1
+            fi
+            echo "::warning::configure attempt $attempt failed; retrying in 5 min (often the snapshot mirror flapping)"
+            attempt=$((attempt + 1))
+            sleep 300
+          done
 
       - name: Build (debug-tools image + docker-*-dbg.gz)
         # Only for full-image builds; a targets override replaces the whole
