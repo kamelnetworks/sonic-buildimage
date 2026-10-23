@@ -364,12 +364,13 @@ jobs:
 
   release:
     needs: build
-    if: ${{ inputs.create_release && !cancelled() && !failure() && !inputs.targets }}
+    if: ${{ inputs.create_release && !cancelled() && !failure() }}
     runs-on: sonic-buildimage
     timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
       PLATFORMS_INPUT: ${{ inputs.platforms }}
+      TARGETS_INPUT: ${{ inputs.targets }}
       PRERELEASE_FLAG: ${{ inputs.prerelease && '--prerelease' || '' }}
     steps:
       - name: Verify dependencies (release job)
@@ -417,21 +418,33 @@ jobs:
           # Azure asset globs did (sonic-<group>.* matches top-level only).
           find release-input \( -name 'sonic-*.bin' -o -name 'sonic-*.bin.log' \) ! -name '*-dbg*' \
             -exec cp -v {} assets/ \;
+          # Component-target builds: publish the produced targets verbatim
+          # (full-image builds contribute only the dbg images + installer).
+          find release-input \( -name 'docker-*.gz' ! -name 'docker-*-dbg.gz' \) \
+            -exec cp -v {} assets/ \;
           ls -lh assets/
 
       - name: Assert asset set covers every platform
         run: |
-          missing=0
-          for p in $(echo "$PLATFORMS_INPUT" | tr ',' ' '); do
-            if ! ls assets/sonic-$p.bin >/dev/null 2>&1; then
-              echo "::error::no sonic-$p.bin among release assets"
+          if [[ -z "$TARGETS_INPUT" ]]; then
+            missing=0
+            for p in $(echo "$PLATFORMS_INPUT" | tr ',' ' '); do
+              if ! ls assets/sonic-$p.bin >/dev/null 2>&1; then
+                echo "::error::no sonic-$p.bin among release assets"
+                missing=1
+              fi
+            done
+          else
+            # Component-target release: just require something to publish.
+            if ! ls assets/* >/dev/null 2>&1; then
+              echo '::error::no release assets collected'
               missing=1
             fi
-          done
+          fi
           if ! ls assets/docker-*-dbg.tar.gz >/dev/null 2>&1; then
             echo "::warning::no docker-*-dbg.tar.gz assets found"
           fi
-          exit $missing
+          exit ${missing:-0}
 
       - name: Resolve tag and changelog baseline
         run: |
