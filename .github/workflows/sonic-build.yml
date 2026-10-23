@@ -79,9 +79,9 @@ on:
         required: false
         default: ''
       snapshot_url:
-        description: 'BUILD_SNAPSHOT_URL override (default packages.trafficmanager.net; use http://snapshot.debian.org/archive if the MS mirror flaps)'
+        description: 'BUILD_SNAPSHOT_URL (default snapshot.debian.org while the MS snapshot mirror outage persists; set http://packages.trafficmanager.net/snapshot to restore the original mirror)'
         required: false
-        default: ''
+        default: 'http://snapshot.debian.org/archive'
 
 permissions:
   contents: write
