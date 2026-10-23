@@ -360,11 +360,13 @@ jobs:
           done
           # Manifest (never published as an asset) + build logs as one
           # tarball so failures stay diagnosable offline - GitHub drops job
-          # log blobs for failed runs occasionally.
+          # log blobs for failed runs occasionally. rules/functions writes
+          # logs next to outputs (target/*.gz.log, target/debs/**/*.log), so
+          # gather every *.log under target/, not just the two dirs.
           { echo "platform=$p"; echo "targets=$TARGETS_INPUT"; } > "artifact-root/manifest-$p.txt"
-          tar czf "artifact-root/${p}__buildlogs.tgz" target/log target/versions/log 2>/dev/null \
-            || tar czf "artifact-root/${p}__buildlogs.tgz" target/log 2>/dev/null \
-            || true
+          loglist=$(mktemp)
+          find target -type f -name '*.log' > "$loglist" 2>/dev/null || true
+          tar czf "artifact-root/${p}__buildlogs.tgz" -T "$loglist" 2>/dev/null || true
           du -sh artifact-root 2>/dev/null
           ls -lh artifact-root/ | head -60
         env:
@@ -419,21 +421,26 @@ jobs:
         # identity must come from the file names, not directory depth.
         run: |
           mkdir assets
-          # Debug docker images: <p>__docker-<name>-dbg.gz ->
-          # docker-<platform>-<name>-dbg.tar.gz (Azure MakeRelease parity).
-          find release-input -name '*__docker-*-dbg.gz' -type f | while read -r f; do
-            base=$(basename "$f" .gz)                # <p>__docker-<name>-dbg
-            p=${base%%__*}; rest=${base#*__}         # rest=docker-<name>-dbg
-            mv "$f" "assets/${rest/docker-/docker-${p}-}.tar.gz"
-          done
-          # Installer binaries + logs + component targets: strip the
-          # "<p>__" prefix; never publish -dbg.bin (Azure parity) or
-          # manifests/buildlogs.
-          find release-input -name '*__*' -type f \
-            ! -name '*__docker-*-dbg.gz' \
-            ! -name '*__sonic-*-dbg.bin' \
-            ! -name '*__buildlogs.tgz' \
-            -exec sh -c 'for f; do base=${f##*/}; p=${base%%__*}; cp -v "$f" "assets/${base#${p}__}"; done' sh {} +
+          if [[ -z "$TARGETS_INPUT" ]]; then
+            # Full build: Azure-parity debug-image rename, installer strip.
+            # Debug docker images: <p>__docker-<name>-dbg.gz ->
+            # docker-<platform>-<name>-dbg.tar.gz (Azure MakeRelease parity).
+            find release-input -name '*__docker-*-dbg.gz' -type f | while read -r f; do
+              base=$(basename "$f" .gz)                # <p>__docker-<name>-dbg
+              p=${base%%__*}; rest=${base#*__}         # rest=docker-<name>-dbg
+              mv "$f" "assets/${rest/docker-/docker-${p}-}.tar.gz"
+            done
+            find release-input -name '*__sonic-*.bin*' -type f \
+              ! -name '*__sonic-*-dbg.bin' \
+              -exec sh -c 'for f; do base=${f##*/}; p=${base%%__*}; cp -v "$f" "assets/${base#${p}__}"; done' sh {} +
+          else
+            # Component build: keep requested-target names verbatim (also
+            # for explicit -dbg component targets), just strip the prefix.
+            find release-input -name '*__*' -type f \
+              ! -name 'manifest-*' \
+              ! -name '*__buildlogs.tgz' \
+              -exec sh -c 'for f; do base=${f##*/}; p=${base%%__*}; cp -v "$f" "assets/${base#${p}__}"; done' sh {} +
+          fi
           ls -lh assets/
 
       - name: Assert asset set
@@ -470,7 +477,7 @@ jobs:
           # lastNonDraftRelease): compare against the previous non-draft
           # build-* release.
           prev=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-            --jq '[.[] | select(.draft == false and (.tag_name | startswith("build-")) and .tag_name != "'"$TAG"'")][0].tag_name // empty')
+            --jq '[.[] | select(.draft == false and (.tag_name | startswith("build-")) and .tag_name != "'"$tag"'")][0].tag_name // empty')
           echo "PREV_TAG=$prev" >> "$GITHUB_ENV"
           echo "previous release tag: ${prev:-none}"
 
