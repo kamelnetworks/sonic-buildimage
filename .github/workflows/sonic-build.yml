@@ -93,6 +93,10 @@ permissions:
 concurrency:
   group: sonic-build
   cancel-in-progress: false
+  # Default queue semantics replace pending same-group runs; with one
+  # self-hosted runner a pending real release must not be displaced by a
+  # newer dispatch.
+  queue: max
 
 jobs:
   setup:
@@ -232,8 +236,11 @@ jobs:
           TARGETS_INPUT: ${{ inputs.targets }}
           TARGETS_PLATFORM_INPUT: ${{ inputs.targets_platform }}
         run: |
-          # Azure buildOptions: USERNAME + job count + version control.
-          opts="USERNAME=admin SONIC_BUILD_JOBS=$(nproc)"
+          # Azure buildOptions parity: USERNAME + version control. Package
+          # concurrency stays at the repo's memory-aware default
+          # (min(nproc/4, ram/8) <= 8 via SONIC_BUILD_MEMORY) instead of the
+          # Azure SONIC_BUILD_JOBS=$(nproc), which assumed 150+GB agents.
+          opts="USERNAME=admin"
           opts="$opts SONIC_VERSION_CONTROL_COMPONENTS=deb,py3,web,git,docker"
           opts="$opts DOCKER_BUILD_NETWORK=host"
           # host network: buildkit in the dind daemon only supports
@@ -334,21 +341,32 @@ jobs:
 
       - name: Collect build artifacts
         if: ${{ !cancelled() }}
+        # Platform-prefixed flat filenames (<p>__<name>): the artifact root
+        # is deterministic (single glob), and download-artifact flattens
+        # single-match downloads but keeps per-artifact dirs for multi - so
+        # platform identity must live in file names, not directory depth.
         run: |
-          mkdir -p artifacts
-          cp -v target/sonic-$MATRIX_PLATFORM.bin* artifacts/ 2>/dev/null || true
-          cp -v target/sonic-$MATRIX_PLATFORM-dbg.bin artifacts/ 2>/dev/null || true
-          cp -v target/docker-*-dbg.gz artifacts/ 2>/dev/null || true
-          cp -v $TARGETS_INPUT artifacts/ 2>/dev/null || true
-          # Keep the artifact non-empty for component-target builds.
-          echo "platform=$MATRIX_PLATFORM targets='$TARGETS_INPUT'" > artifacts/build-info.txt
-          # Build logs (text, small) so failures remain diagnosable offline -
-          # GitHub drops job log blobs for failed runs occasionally.
-          mkdir -p build-logs/versions
-          cp -rv target/log build-logs/pkg 2>/dev/null || true
-          cp -rv target/versions/log build-logs/versions 2>/dev/null || true
-          du -sh build-logs 2>/dev/null
-          ls -lh artifacts/ | head -60
+          p=$MATRIX_PLATFORM
+          mkdir -p artifact-root
+          for f in target/sonic-$p.bin target/sonic-$p.bin.log target/sonic-$p-dbg.bin; do
+            [[ -f "$f" ]] && cp -v "$f" "artifact-root/${p}__$(basename "$f")"
+          done
+          for f in target/docker-*-dbg.gz; do
+            [[ -e "$f" ]] && cp -v "$f" "artifact-root/${p}__$(basename "$f")"
+          done
+          # Component targets, verbatim names with the platform prefix.
+          for t in $TARGETS_INPUT; do
+            [[ -e "$t" ]] && cp -v "$t" "artifact-root/${p}__$(basename "$t")"
+          done
+          # Manifest (never published as an asset) + build logs as one
+          # tarball so failures stay diagnosable offline - GitHub drops job
+          # log blobs for failed runs occasionally.
+          { echo "platform=$p"; echo "targets=$TARGETS_INPUT"; } > "artifact-root/manifest-$p.txt"
+          tar czf "artifact-root/${p}__buildlogs.tgz" target/log target/versions/log 2>/dev/null \
+            || tar czf "artifact-root/${p}__buildlogs.tgz" target/log 2>/dev/null \
+            || true
+          du -sh artifact-root 2>/dev/null
+          ls -lh artifact-root/ | head -60
         env:
           TARGETS_INPUT: ${{ inputs.targets }}
 
@@ -357,9 +375,7 @@ jobs:
         if: ${{ !cancelled() }}
         with:
           name: sonic-buildimage.${{ matrix.platform }}
-          path: |
-            artifacts/*
-            build-logs/**
+          path: artifact-root/*
           retention-days: 14
 
   release:
@@ -397,37 +413,33 @@ jobs:
           path: release-input
 
       - name: Prepare release assets
+        # Artifacts use platform-prefixed flat names (<p>__<name>); the
+        # download layout differs between single-match (flattened into
+        # release-input) and multi-match (per-artifact dirs), so platform
+        # identity must come from the file names, not directory depth.
         run: |
-          # Flatten and rename like the Azure MakeRelease stage:
-          #   sonic-buildimage.<platform>/artifacts/docker-<name>-dbg.gz
-          #     -> docker-<platform>-<name>-dbg.tar.gz
           mkdir assets
-          # upload-artifact puts files at the artifact root, so the parent
-          # dir is the artifact name: sonic-buildimage.<platform>
-          find release-input -name 'docker-*-dbg.gz' -type f | while read -r f; do
-            dir=$(basename "$(dirname "$f")")
-            case "$dir" in
-              sonic-buildimage.*) platform=${dir#sonic-buildimage.} ;;
-              *) echo "::error::unexpected artifact layout for $f (dir $dir)"; exit 1 ;;
-            esac
-            base=$(basename "$f" .gz)              # docker-<name>-dbg
-            new="assets/$(echo "$base" | sed "s/^docker-/docker-${platform}-/").tar.gz"
-            mv "$f" "$new"
+          # Debug docker images: <p>__docker-<name>-dbg.gz ->
+          # docker-<platform>-<name>-dbg.tar.gz (Azure MakeRelease parity).
+          find release-input -name '*__docker-*-dbg.gz' -type f | while read -r f; do
+            base=$(basename "$f" .gz)                # <p>__docker-<name>-dbg
+            p=${base%%__*}; rest=${base#*__}         # rest=docker-<name>-dbg
+            mv "$f" "assets/${rest/docker-/docker-${p}-}.tar.gz"
           done
-          # Image binaries and their build logs; exclude -dbg.bin like the
-          # Azure asset globs did (sonic-<group>.* matches top-level only).
-          find release-input \( -name 'sonic-*.bin' -o -name 'sonic-*.bin.log' \) ! -name '*-dbg*' \
-            -exec cp -v {} assets/ \;
-          # Component-target builds: publish the produced targets verbatim
-          # (full-image builds contribute only the dbg images + installer).
-          find release-input \( -name 'docker-*.gz' ! -name 'docker-*-dbg.gz' \) \
-            -exec cp -v {} assets/ \;
+          # Installer binaries + logs + component targets: strip the
+          # "<p>__" prefix; never publish -dbg.bin (Azure parity) or
+          # manifests/buildlogs.
+          find release-input -name '*__*' -type f \
+            ! -name '*__docker-*-dbg.gz' \
+            ! -name '*__sonic-*-dbg.bin' \
+            ! -name '*__buildlogs.tgz' \
+            -exec sh -c 'for f; do base=${f##*/}; p=${base%%__*}; cp -v "$f" "assets/${base#${p}__}"; done' sh {} +
           ls -lh assets/
 
-      - name: Assert asset set covers every platform
+      - name: Assert asset set
         run: |
+          missing=0
           if [[ -z "$TARGETS_INPUT" ]]; then
-            missing=0
             for p in $(echo "$PLATFORMS_INPUT" | tr ',' ' '); do
               if ! ls assets/sonic-$p.bin >/dev/null 2>&1; then
                 echo "::error::no sonic-$p.bin among release assets"
@@ -435,16 +447,18 @@ jobs:
               fi
             done
           else
-            # Component-target release: just require something to publish.
-            if ! ls assets/* >/dev/null 2>&1; then
-              echo '::error::no release assets collected'
-              missing=1
-            fi
+            # Component-target release: every requested output must be there.
+            for t in $TARGETS_INPUT; do
+              if ! ls "assets/$(basename "$t")" >/dev/null 2>&1; then
+                echo "::error::requested target $t missing from assets"
+                missing=1
+              fi
+            done
           fi
           if ! ls assets/docker-*-dbg.tar.gz >/dev/null 2>&1; then
             echo "::warning::no docker-*-dbg.tar.gz assets found"
           fi
-          exit ${missing:-0}
+          exit $missing
 
       - name: Resolve tag and changelog baseline
         run: |
@@ -456,7 +470,7 @@ jobs:
           # lastNonDraftRelease): compare against the previous non-draft
           # build-* release.
           prev=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-            --jq '[.[] | select(.draft == false and (.tag_name | startswith("build-")))][0].tag_name // empty')
+            --jq '[.[] | select(.draft == false and (.tag_name | startswith("build-")) and .tag_name != "'"$TAG"'")][0].tag_name // empty')
           echo "PREV_TAG=$prev" >> "$GITHUB_ENV"
           echo "previous release tag: ${prev:-none}"
 
@@ -468,33 +482,55 @@ jobs:
           git tag -f "$TAG" "$GITHUB_SHA"
           git push -f origin "refs/tags/$TAG"
 
-      - name: Create release
+      - name: Create draft release
+        # Draft-first: publish only after assets are uploaded and verified.
+        # Reruns resume an existing draft; a published release for this tag
+        # is left untouched (never deleted as a retry mechanism).
         run: |
-          notes_body=$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
-            -f tag_name="$TAG" \
-            ${PREV_TAG:+-f previous_tag_name="$PREV_TAG"} \
-            --jq '.body')
-          printf 'Build version `SONiC.%s-kamel.%s-%s`\n\n%s\n' \
-            "$BRANCH" "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" "$notes_body" > release-notes.md
-          cat release-notes.md
-          # Rerun support: delete a previous release for the same tag first
-          # (--cleanup-tag removes the tag too), re-tag the built commit, then
-          # create with --target/--verify-tag so a rerun never points the tag
-          # at a different commit than the artifacts were built from.
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "release $TAG already exists; recreating"
-            gh release delete "$TAG" --yes --cleanup-tag
+            draft=$(gh release view "$TAG" --json isDraft --jq .isDraft)
+            if [[ "$draft" == "true" ]]; then
+              echo "resuming existing draft release $TAG"
+            else
+              echo "release $TAG is already published; nothing to do"
+              echo "PUBLISHED_ALREADY=true" >> "$GITHUB_ENV"
+            fi
+          else
+            notes_body=$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+              -f tag_name="$TAG" \
+              ${PREV_TAG:+-f previous_tag_name="$PREV_TAG"} \
+              --jq '.body')
+            printf 'Build version `SONiC.%s-kamel.%s-%s`\n\n%s\n' \
+              "$BRANCH" "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" "$notes_body" > release-notes.md
+            cat release-notes.md
+            gh release create "$TAG" \
+              --draft \
+              --target "$GITHUB_SHA" \
+              --verify-tag \
+              --title "${BRANCH}-v${GITHUB_RUN_NUMBER}" \
+              --notes-file release-notes.md \
+              ${PRERELEASE_FLAG}
           fi
-          git tag -f "$TAG" "$GITHUB_SHA"
-          git push -f origin "refs/tags/$TAG"
-          gh release create "$TAG" \
-            --target "$GITHUB_SHA" \
-            --verify-tag \
-            --title "${BRANCH}-v${GITHUB_RUN_NUMBER}" \
-            --notes-file release-notes.md \
-            ${PRERELEASE_FLAG}
 
       - name: Upload release assets
+        if: ${{ env.PUBLISHED_ALREADY != 'true' }}
         run: |
           gh release upload "$TAG" assets/* --clobber
-          gh release view "$TAG" --json assets --jq '.assets[].name'
+
+      - name: Verify uploaded assets
+        if: ${{ env.PUBLISHED_ALREADY != 'true' }}
+        run: |
+          uploaded=$(gh release view "$TAG" --json assets --jq '[.assets[].name] | join(" ")')
+          missing=0
+          for a in assets/*; do
+            name=$(basename "$a")
+            case " $uploaded " in *" $name "*) ;; *) echo "::error::$name missing from the release"; missing=1 ;; esac
+          done
+          (( missing )) && exit 1 || true
+          echo "assets: $uploaded"
+
+      - name: Publish release
+        if: ${{ env.PUBLISHED_ALREADY != 'true' }}
+        run: |
+          gh release edit "$TAG" --draft=false
+          gh release view "$TAG" --json isDraft,isPrerelease,assets --jq '{isDraft, isPrerelease, assets: (.assets | length)}'
