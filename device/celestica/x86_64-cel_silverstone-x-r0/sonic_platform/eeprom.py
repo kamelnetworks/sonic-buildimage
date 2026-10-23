@@ -29,7 +29,7 @@ class Tlv(eeprom_tlvinfo.TlvInfoDecoder):
     _TLV_DISPLAY_VENDOR_EXT = True
 
     def __init__(self):
-        self._eeprom_path = "/sys/class/i2c-adapter/i2c-{0}/{0}-00{1}/eeprom".format(TLV_EEPROM_I2C_BUS, TLV_EEPROM_I2C_ADDR)
+        self._eeprom_path = "/sys/bus/i2c/devices/{0}-00{1}/eeprom".format(TLV_EEPROM_I2C_BUS, TLV_EEPROM_I2C_ADDR)
         super(Tlv, self).__init__(self._eeprom_path, 0, '', True)
         self._eeprom = self._load_eeprom()
 

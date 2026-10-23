@@ -22,7 +22,7 @@ SYSLOG_IDENTIFIER = 'thermalctld'
 FAN_STATUS_FILE = "/var/fan_status.txt"
 
 NULL_VAL = "N/A"
-I2C_ADAPTER_PATH = "/sys/class/i2c-adapter"
+I2C_ADAPTER_PATH = "/sys/bus/i2c/devices"
 IPMI_SENSOR_TEMP_CMD = "ipmitool sensor | grep degrees"
 THERMAL_INFO = [
     {'name': 'TEMP_FB_U52', 'temp': 'na'},  # 0
