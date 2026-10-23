@@ -342,6 +342,12 @@ jobs:
           cp -v $TARGETS_INPUT artifacts/ 2>/dev/null || true
           # Keep the artifact non-empty for component-target builds.
           echo "platform=$MATRIX_PLATFORM targets='$TARGETS_INPUT'" > artifacts/build-info.txt
+          # Build logs (text, small) so failures remain diagnosable offline -
+          # GitHub drops job log blobs for failed runs occasionally.
+          mkdir -p build-logs/versions
+          cp -rv target/log build-logs/pkg 2>/dev/null || true
+          cp -rv target/versions/log build-logs/versions 2>/dev/null || true
+          du -sh build-logs 2>/dev/null
           ls -lh artifacts/ | head -60
         env:
           TARGETS_INPUT: ${{ inputs.targets }}
@@ -351,7 +357,9 @@ jobs:
         if: ${{ !cancelled() }}
         with:
           name: sonic-buildimage.${{ matrix.platform }}
-          path: artifacts/*
+          path: |
+            artifacts/*
+            build-logs/**
           retention-days: 14
 
   release:
