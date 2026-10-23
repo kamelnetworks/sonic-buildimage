@@ -820,6 +820,21 @@ start() {
     done
 {%- endif %}
 {%- endif %}
+{%- if sonic_asic_platform == "marvell-teralynx" %}
+{%- if docker_container_name == "syncd" %}
+    # --privileged used to fully open the device cgroup; without it, only explicitly
+    # granted devices are accessible, and the Teralynx SDK fails switch create with
+    # "Unable to open Innovium device /dev/ipd0". Grant every ipd device node the ipd
+    # kernel module created on this host (one per ASIC). The -e check also skips the
+    # literal pattern when the glob matches nothing.
+    TERALYNX_DEV_MNT=""
+    for _ipd_dev in /dev/ipd*; do
+        if [ -e "$_ipd_dev" ]; then
+            TERALYNX_DEV_MNT="$TERALYNX_DEV_MNT --device=$_ipd_dev:$_ipd_dev:rwm"
+        fi
+    done
+{%- endif %}
+{%- endif %}
 {%- if docker_container_name == "pmon" %}
     # Build --device-cgroup-rule flags from the hot-plug bus/FRU majors.
     PMON_DEVICE_CGROUP_RULES=()
@@ -883,6 +898,11 @@ start() {
         --shm-size=${SYNCD_SHM_SIZE:-512m} \
         -v /var/run/docker-syncd$DEV:/var/run/sswsyncd \
         $BRCM_DEV_MNT \
+{%- endif %}
+{%- endif %}
+{%- if sonic_asic_platform == "marvell-teralynx" %}
+{%- if docker_container_name == "syncd" %}
+        $TERALYNX_DEV_MNT \
 {%- endif %}
 {%- endif %}
 {%- if docker_container_name == "pmon" %}
