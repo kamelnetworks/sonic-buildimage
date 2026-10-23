@@ -55,6 +55,10 @@ on:
         description: 'Optional whitespace-separated make targets (e.g. target/docker-ptf.gz). Overrides the full-image build.'
         required: false
         default: ''
+      targets_platform:
+        description: 'Platform to configure for targets-override builds (component targets like docker-ptf.gz are vs-platform)'
+        required: false
+        default: 'vs'
       debug_image:
         description: 'Also build the INSTALL_DEBUG_TOOLS=y image and docker-*-dbg.gz images'
         required: false
@@ -225,6 +229,8 @@ jobs:
       - name: Compute build options
         env:
           MATRIX_PLATFORM: ${{ matrix.platform }}
+          TARGETS_INPUT: ${{ inputs.targets }}
+          TARGETS_PLATFORM_INPUT: ${{ inputs.targets_platform }}
         run: |
           # Azure buildOptions: USERNAME + job count + version control.
           opts="USERNAME=admin SONIC_BUILD_JOBS=$(nproc)"
@@ -240,6 +246,13 @@ jobs:
           echo "BUILD_OPTS=$opts" >> "$GITHUB_ENV"
           # Used by every later step in this job.
           echo "MATRIX_PLATFORM=$MATRIX_PLATFORM" >> "$GITHUB_ENV"
+          # Component-target builds (targets override) configure for the
+          # platform the targets belong to (docker-ptf.gz etc. are 'vs').
+          if [[ -n '$TARGETS_INPUT' ]]; then
+            echo "BUILD_PLATFORM=$TARGETS_PLATFORM_INPUT" >> "$GITHUB_ENV"
+          else
+            echo "BUILD_PLATFORM=$MATRIX_PLATFORM" >> "$GITHUB_ENV"
+          fi
           echo "build options: $opts"
 
       - name: Configure (rules/config.user)
@@ -274,7 +287,7 @@ jobs:
           # configure: it is idempotent, and a flap usually clears in
           # minutes. 3 attempts, 5 min apart.
           attempt=1
-          until make NOBOOKWORM=1 configure PLATFORM=$MATRIX_PLATFORM PLATFORM_ARCH=amd64 $BUILD_OPTS; do
+          until make NOBOOKWORM=1 configure PLATFORM=$BUILD_PLATFORM PLATFORM_ARCH=amd64 $BUILD_OPTS; do
             if (( attempt >= 3 )); then
               echo '::error::configure failed after 3 attempts'
               exit 1
