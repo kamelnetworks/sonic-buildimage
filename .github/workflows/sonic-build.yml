@@ -206,6 +206,17 @@ jobs:
             exit 1
           fi
 
+      - name: Create MTU-correct build network
+        # The dind sidecar's default bridge is MTU 1500 while the pod egress
+        # is 1450 (calico): full-size packets to hosts with PMTUD-hostile
+        # edges (GitHub, Azure Front Door) blackhole, e.g. git clone RST at
+        # ~150s and TLS ClientHello with no ServerHello. A pre-created
+        # network with a safe MTU fixes every build container at once.
+        run: |
+          docker network inspect sonic-buildnet >/dev/null 2>&1 \
+            || docker network create --opt com.docker.network.driver.mtu=1400 sonic-buildnet
+          docker network inspect sonic-buildnet --format '{{.Name}} mtu={{index .Options "com.docker.network.driver.mtu"}}'
+
       - name: Verify dependencies
         run: |
           which make
@@ -229,6 +240,8 @@ jobs:
           # Azure buildOptions: USERNAME + job count + version control.
           opts="USERNAME=admin SONIC_BUILD_JOBS=$(nproc)"
           opts="$opts SONIC_VERSION_CONTROL_COMPONENTS=deb,py3,web,git,docker"
+          # MTU-correct network for the slave container and all image builds.
+          opts="$opts DOCKER_BUILD_NETWORK=sonic-buildnet"
           # Azure adds INCLUDE_DHCP_SERVER=y for the mellanox group.
           if [[ "$MATRIX_PLATFORM" == mellanox ]]; then
             opts="$opts INCLUDE_DHCP_SERVER=y"

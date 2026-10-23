@@ -454,7 +454,18 @@ endif
 
 # The target's docker.sh also requests unlimited nproc in the image chroot.
 # Native-daemon slaves lack CAP_SYS_RESOURCE, so Docker must set it at startup.
-DOCKER_RUN := docker run --rm=true $(DOCKER_PRIVMODE) --init \
+# Build containers' network: 'default' (docker0) or a pre-created network name.
+# The CI dind sidecar's docker0 inherits a 1500 MTU while the pod egress path
+# is smaller (calico 1450), so full-size packets to hosts with PMTUD-hostile
+# edges (GitHub, Azure Front Door) blackhole. A pre-created MTU-correct
+# network fixes it; see .github/workflows/sonic-build.yml (k8s builder path
+# unchanged: DOCKER_BUILD_NETWORK stays 'default' there).
+DOCKER_BUILD_NETWORK ?= default
+ifneq ($(strip $(DOCKER_BUILD_NETWORK)),default)
+DOCKER_BUILD_NETWORK_FLAG = --network $(DOCKER_BUILD_NETWORK)
+endif
+
+DOCKER_RUN := docker run --rm=true $(DOCKER_PRIVMODE) $(DOCKER_BUILD_NETWORK_FLAG) --init \
     -v $(DOCKER_BUILDER_MOUNT) \
     $(GIT_WORKTREE_MOUNTS) \
     -v "$(DOCKER_LOCKDIR):$(DOCKER_LOCKDIR)" \
@@ -463,6 +474,7 @@ DOCKER_RUN := docker run --rm=true $(DOCKER_PRIVMODE) --init \
     -e "http_proxy=$(http_proxy)" \
     -e "https_proxy=$(https_proxy)" \
     -e "no_proxy=$(no_proxy)" \
+    -e "DOCKER_BUILD_OPTS=$(DOCKER_BUILD_OPTS)" \
     -i$(shell { if [ -t 0 ]; then echo t; fi }) \
     --ulimit nofile=$(SONIC_BUILD_NOFILE):$(SONIC_BUILD_NOFILE) \
     --ulimit nproc=-1:-1 \
@@ -613,6 +625,7 @@ DOCKER_NO_CACHE_FLAG = --no-cache
 endif
 
 DOCKER_SLAVE_BASE_BUILD = docker build $(DOCKER_NO_CACHE_FLAG) \
+		    $(DOCKER_BUILD_NETWORK_FLAG) \
 		    -t $(SLAVE_BASE_IMAGE):$(SLAVE_BASE_TAG) \
 		    --build-arg http_proxy=$(http_proxy) \
 		    --build-arg https_proxy=$(https_proxy) \
