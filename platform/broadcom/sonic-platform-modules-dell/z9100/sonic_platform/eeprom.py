@@ -10,6 +10,7 @@
 #############################################################################
 
 try:
+    import os
     from sonic_eeprom import eeprom_tlvinfo
 except ImportError as e:
     raise ImportError(str(e) + "- required module not found")
@@ -25,6 +26,13 @@ class Eeprom(eeprom_tlvinfo.TlvInfoDecoder):
             self.eeprom_data = self.read_eeprom()
         except:
             self.eeprom_data = "N/A"
+            if os.geteuid() != 0:
+                # The system EEPROM sysfs node is root-only, so a non-root
+                # caller (e.g. 'show interfaces status' building a Chassis
+                # via is_rj45_port) can't read it. Don't fail Chassis
+                # creation; use the contents syseepromd publishes in STATE_DB.
+                self.eeprom_tlv_dict = self._get_eeprom_tlv_dict_from_db()
+                return
             raise RuntimeError("Eeprom is not Programmed")
         else:
             eeprom = self.eeprom_data
@@ -112,3 +120,29 @@ class Eeprom(eeprom_tlvinfo.TlvInfoDecoder):
         found in the system EEPROM.
         """
         return self.eeprom_tlv_dict
+
+    def _get_eeprom_tlv_dict_from_db(self):
+        """
+        Returns the system EEPROM TLVs as published by syseepromd in
+        STATE_DB (EEPROM_INFO table), keyed like system_eeprom_info().
+        Used when the EEPROM device itself is not readable by the caller.
+        """
+        tlv_dict = dict()
+        try:
+            if self._redis_hget('EEPROM_INFO|State', 'Initialized') != '1':
+                return tlv_dict
+            keys = self.state_db.keys(self.state_db.STATE_DB,
+                                      'EEPROM_INFO|0x*') or []
+            for key in keys:
+                code = int(key.split('|')[1], 16)
+                value = self._redis_hget(key, 'Value')
+                if value is None:
+                    num = self._redis_hget(key, 'Num_vendor_ext')
+                    if num:
+                        value = self._redis_hget(
+                            key, 'Value_{}'.format(int(num) - 1))
+                if value is not None:
+                    tlv_dict["0x%02X" % code] = value
+        except Exception:
+            pass
+        return tlv_dict
