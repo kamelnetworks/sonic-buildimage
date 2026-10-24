@@ -7,7 +7,7 @@ packets. All SAI switch/port state is fictitious.** This is intended for isolate
 TD3 platform development, not a production image or a functional syncd alternative.
 
 The implementation is in [Nova PR #3](https://github.com/sonix-network/nova-sai/pull/3);
-the helper pins commit `03c688e3df65e791f8356cdd745480669c1ea60f`.
+the helper pins commit `61d9f908fb7acd4b84e7e6a34d595bc364d03439`.
 
 The stock kernel configuration remains unchanged: CONFIG_RUST stays disabled
 and CONFIG_MODVERSIONS stays enabled. This avoids breaking existing Broadcom
