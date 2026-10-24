@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Opt-in build of an experimental TD3 replacement .deb. Does not install it.
+set -euo pipefail
+root=$(cd "$(dirname "$0")/.." && pwd)
+revision=03c688e3df65e791f8356cdd745480669c1ea60f
+source_dir=
+kernel_debs="$root/target/debs/trixie"
+output_dir="$root/target/debs/trixie"
+usage() {
+    cat <<'USAGE'
+Usage: scripts/build-nova-sai [--source NOVA_CHECKOUT] [--kernel-debs DIRECTORY] [--output DIRECTORY]
+
+Build nova-sai's replacement .deb with Bazel; never install or activate it.
+Without --source, fetch the pinned Nova source into target/nova-sai-src.
+The kernel SDK must match Nova's checked-in kernel/target.json hashes.
+The package is experimental and DOES NOT FORWARD PACKETS when installed.
+USAGE
+}
+while (($#)); do
+    case "$1" in
+        --help|-h) usage; exit 0 ;;
+        --source|--kernel-debs|--output)
+            if (($# < 2)); then usage >&2; exit 2; fi
+            case "$1" in
+                --source) source_dir=$2 ;;
+                --kernel-debs) kernel_debs=$2 ;;
+                --output) output_dir=$2 ;;
+            esac
+            shift 2 ;;
+        *) usage >&2; exit 2 ;;
+    esac
+done
+kernel_debs=$(cd "$kernel_debs" && pwd)
+if [[ -z "$source_dir" ]]; then
+    source_dir="$root/target/nova-sai-src/$revision"
+    if [[ ! -d "$source_dir/.git" ]]; then
+        mkdir -p "$source_dir"
+        git -C "$source_dir" init
+        git -C "$source_dir" remote add origin https://github.com/sonix-network/nova-sai.git
+        git -C "$source_dir" fetch --depth 1 origin "$revision"
+        git -C "$source_dir" checkout --detach FETCH_HEAD
+    fi
+    if [[ "$(git -C "$source_dir" rev-parse HEAD)" != "$revision" ]]; then
+        echo "Unexpected revision in $source_dir; refusing to reset the checkout" >&2
+        exit 1
+    fi
+fi
+source_dir=$(cd "$source_dir" && pwd)
+if [[ ! -f "$source_dir/MODULE.bazel" || ! -f "$source_dir/kernel/target.json" ]]; then
+    echo "Not a Nova kernel/package source checkout: $source_dir" >&2
+    exit 1
+fi
+(
+    cd "$source_dir"
+    "${BAZEL:-bazel}" build //packaging:deb "--repo_env=NOVA_SAI_KERNEL_DEBS=$kernel_debs"
+)
+mkdir -p "$output_dir"
+artifact=nova-sai_0.1.0_amd64.deb
+install -m 0644 "$source_dir/bazel-bin/packaging/$artifact" "$output_dir/$artifact"
+(cd "$output_dir" && sha256sum "$artifact" > "$artifact.sha256")
+echo "Built $output_dir/$artifact (not installed). See doc/nova-sai.md before deploying."
