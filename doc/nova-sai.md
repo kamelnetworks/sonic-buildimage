@@ -7,13 +7,15 @@ packets. All SAI switch/port state is fictitious.** This is intended for isolate
 TD3 platform development, not a production image or a functional syncd alternative.
 
 The implementation is in [Nova PR #3](https://github.com/sonix-network/nova-sai/pull/3);
-the helper pins commit `5cdc31697d71ed3cb15738e92aa390d76eeab3b4`.
+the helper pins commit `875cc08bf10505ca7ab84b6110be41da0b3dd673`.
 
 The stock kernel configuration remains unchanged: CONFIG_RUST stays disabled
 and CONFIG_MODVERSIONS stays enabled. This avoids breaking existing Broadcom
 module binaries. The Rust module uses the stock C kernel ABI and version checks;
-its core is no_std Rust with owned initialization/Drop teardown. It does not bind
-PCI devices, access registers, or use DMA. Native Rust migration is deferred.
+its core is no_std Rust with owned initialization/Drop teardown. The device ABI
+provides bounded mock register transfers and reset; switch semantics and mock
+ASIC programming remain in the userspace Rust SDK. It does not bind
+PCI devices, access physical registers, or use DMA. Native Rust migration is deferred.
 
 ## Build only
 
@@ -58,7 +60,9 @@ and starts the mock Nova service. Management NIC/board drivers and vendor packag
 are preserved. Forwarding stops. Keep console access for runtime replacement.
 
 The package records the prior feature/service/module state and attempts rollback
-on activation failure. Restore it with `sudo nova-sai-control deactivate` or
+on activation failure. The service uses Type=notify and a 15-second startup
+timeout; success requires adapter readiness, including during upgrades. A real
+post-fork initialization failure and exact rollback were tested on smoketest. Restore it with `sudo nova-sai-control deactivate` or
 remove the package (which restores recorded state before removing files).
 
 Validation in Nova includes a C ABI test, a live Thrift/shell test, Rust core
@@ -67,7 +71,7 @@ in QEMU with the actual stock SONiC kernel. The SAI library communicates with
 the Rust driver through a versioned `/dev/nova` ioctl interface. Physical
 installation, SAI operations through the driver, removal/restoration and reinstall
 passed on the isolated TD3 smoketest switch; see the
-[report](https://github.com/sonix-network/nova-sai/blob/5cdc31697d71ed3cb15738e92aa390d76eeab3b4/docs/test/smoketest/nova-install-2026-10-24.md).
+[report](https://github.com/sonix-network/nova-sai/blob/875cc08bf10505ca7ab84b6110be41da0b3dd673/docs/test/smoketest/nova-review-2026-10-24.md).
 The stock forwarding stack was already disabled on that lab switch. Run this helper's tests with:
 
 ```sh

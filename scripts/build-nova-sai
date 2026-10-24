@@ -2,7 +2,7 @@
 # Opt-in build of an experimental TD3 replacement .deb. Does not install it.
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
-revision=5cdc31697d71ed3cb15738e92aa390d76eeab3b4
+revision=875cc08bf10505ca7ab84b6110be41da0b3dd673
 source_dir=
 kernel_debs="$root/target/debs/trixie"
 output_dir="$root/target/debs/trixie"
