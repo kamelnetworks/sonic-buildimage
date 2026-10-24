@@ -241,7 +241,14 @@ jobs:
           # (min(nproc/4, ram/8) <= 8 via SONIC_BUILD_MEMORY) instead of the
           # Azure SONIC_BUILD_JOBS=$(nproc), which assumed 150+GB agents.
           opts="USERNAME=admin"
-          opts="$opts SONIC_VERSION_CONTROL_COMPONENTS=deb,py3,web,git,docker"
+          # Version control: the repo default (py2,py3,web,git,docker), i.e.
+          # the same as tools/kubernetes/build.sh - the fork's current release
+          # path (202611 releases). Setting 'deb' too (as the Azure pipeline
+          # did) forces MIRROR_SNAPSHOT=y with deb snapshots, and the fork's
+          # host-base-image version pins are stale vs any snapshot, which
+          # kills the RFS baseimage build (bash==5.2.37-2 vs 5.2.37-2+b10).
+          # web/git/docker pinning has graceful fallbacks; deb pinning does
+          # not, and the fork has no running version-bump pipeline.
           opts="$opts DOCKER_BUILD_NETWORK=host"
           # The docker save lock dir must live under the workspace: the dind
           # daemon performs the bind mounts, and a job-container /tmp path is
