@@ -357,7 +357,14 @@ jobs:
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          img_tag=$(make NOBOOKWORM=1 $BUILD_OPTS showtag 2>/dev/null | tail -1)
+          # showtag output must be a strict image:tag ref; make directory
+          # chatter would otherwise poison the ref (and the push step).
+          img_tag=$(MAKEFLAGS=--no-print-directory make NOBOOKWORM=1 $BUILD_OPTS showtag 2>/dev/null | grep -E '^[A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9._-]+$' | tail -1)
+          if [[ ! "$img_tag" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9._-]+$ ]]; then
+            echo "::warning::could not determine the slave image tag from showtag; skipping slave cache"
+            echo "SLAVE_REUSED=false" >> "$GITHUB_ENV"
+            exit 0
+          fi
           echo "slave image: ghcr.io/kamelnetworks/$img_tag"
           echo "SLAVE_IMAGE_REF=ghcr.io/kamelnetworks/$img_tag" >> "$GITHUB_ENV"
           if docker pull "ghcr.io/kamelnetworks/$img_tag"; then
