@@ -194,7 +194,7 @@ jobs:
               --draft \
               --target "$GITHUB_SHA" \
               --verify-tag \
-              --title "${BRANCH}-v${GITHUB_RUN_NUMBER}" \
+              --title "${branch}-v${GITHUB_RUN_NUMBER}" \
               --notes-file release-notes.md \
               ${PRERELEASE_FLAG}
           fi
