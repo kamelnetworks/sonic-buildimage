@@ -86,16 +86,22 @@ on:
         type: boolean
         default: true
       cache_mode:
-        description: 'SONIC_DPKG_CACHE_METHOD (none until a persistent compiled-artifact cache volume exists on the runner)'
+        description: 'SONIC_DPKG_CACHE_METHOD (rwcache: compiled-artifact cache on the persistent /var/cache/sonic PVC)'
         required: false
-        default: 'none'
+        default: 'rwcache'
       cache_source:
-        description: 'SONIC_DPKG_CACHE_SOURCE host directory (only used when cache_mode != none)'
+        description: 'SONIC_DPKG_CACHE_SOURCE host directory (persistent across pods on the runner PVC)'
         required: false
-        default: ''
+        default: '/var/cache/sonic/artifacts'
+      slave_cache:
+        description: 'Reuse/push the slave environment image via GHCR (saves ~35 min per pod when warm)'
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: write
+  packages: write
 
 concurrency:
   group: sonic-build
@@ -340,6 +346,32 @@ jobs:
           echo "build options: $opts"
           mkdir -p "$PWD/.docklock"
 
+      - name: Slave cache (GHCR pre-pull or reuse opt-in)
+        # The build environment IS the base image (DooD runs on it directly);
+        # rebuilding it costs ~35 min per pod. Persist it on GHCR and reuse:
+        # pre-pull, and on a hit pass SONIC_SLAVE_REUSE_* so make reuses it
+        # (the reuse tag comes from the computed showtag, so the stale-tag
+        # guard in Makefile.work cannot fire). On a miss the normal build
+        # path runs and a later step pushes the fresh image for next time.
+        if: ${{ inputs.slave_cache }}
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          img_tag=$(make NOBOOKWORM=1 $BUILD_OPTS showtag 2>/dev/null | tail -1)
+          echo "slave image: ghcr.io/kamelnetworks/$img_tag"
+          echo "SLAVE_IMAGE_REF=ghcr.io/kamelnetworks/$img_tag" >> "$GITHUB_ENV"
+          if docker pull "ghcr.io/kamelnetworks/$img_tag"; then
+            opts="$BUILD_OPTS SONIC_SLAVE_REUSE_SLAVE=y"
+            opts="$opts SONIC_SLAVE_REUSE_TRIXIE_IMAGE=ghcr.io/kamelnetworks/$img_tag"
+            opts="$opts SONIC_SLAVE_REUSE_TRIXIE_TAG=${img_tag##*:}"
+            echo "BUILD_OPTS=$opts" >> "$GITHUB_ENV"
+            echo "SLAVE_REUSED=true" >> "$GITHUB_ENV"
+            echo "slave image reused from GHCR"
+          else
+            echo "SLAVE_REUSED=false" >> "$GITHUB_ENV"
+            echo "no cached slave image; the build will produce one"
+          fi
+
       - name: Configure (rules/config.user)
         env:
           CACHE_MODE_INPUT: ${{ inputs.cache_mode }}
@@ -349,12 +381,18 @@ jobs:
           if [[ -e rules/config.user ]]; then
             echo "rules/config.user already exists; not overwriting"
           else
+            # rwcache needs a usable persistent cache dir; fall back to none.
+            cache_mode=$CACHE_MODE_INPUT
+            if [[ "$cache_mode" != none && ( ! -d "$CACHE_SOURCE_INPUT" || ! -w "$CACHE_SOURCE_INPUT" ) ]]; then
+              echo "::warning::cache source $CACHE_SOURCE_INPUT not usable; falling back to cache_mode=none"
+              cache_mode=none
+            fi
             {
               echo 'DEFAULT_CONTAINER_REGISTRY = docker.io'
               echo 'INCLUDE_FIPS = n'
               echo 'SONIC_CONFIG_USE_NATIVE_DOCKERD_FOR_BUILD = y'
-              echo "SONIC_DPKG_CACHE_METHOD = $CACHE_MODE_INPUT"
-              if [[ -n "$CACHE_SOURCE_INPUT" ]]; then
+              echo "SONIC_DPKG_CACHE_METHOD = $cache_mode"
+              if [[ "$cache_mode" != none ]]; then
                 echo "SONIC_DPKG_CACHE_SOURCE = $CACHE_SOURCE_INPUT"
               fi
               echo 'SONIC_BUILD_MEMORY = 28g'
@@ -383,6 +421,17 @@ jobs:
             attempt=$((attempt + 1))
             sleep 300
           done
+
+      - name: Push slave image to GHCR (for the next pod)
+        # Only when this run had to build it; reuse runs skip.
+        if: ${{ inputs.slave_cache && env.SLAVE_REUSED == 'false' && success() }}
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          if docker image inspect "$SLAVE_IMAGE_REF" >/dev/null 2>&1; then
+            docker push "$SLAVE_IMAGE_REF" && echo "pushed $SLAVE_IMAGE_REF"
+          else
+            echo "::warning::slave image $SLAVE_IMAGE_REF not found to push"
+          fi
 
       - name: Build (debug-tools image + docker-*-dbg.gz)
         # Only for full-image builds; a targets override replaces the whole
