@@ -163,34 +163,34 @@ jobs:
           # Tag the exact built commit first (the generate-notes endpoint needs
           # the tag to exist); build-N increments monotonically with the run
           # number. Reruns force-move the tag onto the same commit.
-          git tag -f "$TAG" "$GITHUB_SHA"
-          git push -f origin "refs/tags/$TAG"
+          git tag -f "$tag" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$tag"
           # Like the Azure GitHubRelease@1 (changeLogCompareToRelease:
           # lastNonDraftRelease): compare against the previous non-draft
           # build-* release, excluding the tag being published.
           prev=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-            --jq '[.[] | select(.draft == false and (.tag_name | startswith("build-")) and .tag_name != "'"$TAG"'")][0].tag_name // empty')
+            --jq '[.[] | select(.draft == false and (.tag_name | startswith("build-")) and .tag_name != "'"$tag"'")][0].tag_name // empty')
           echo "previous release tag: ${prev:-none}"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            draft=$(gh release view "$TAG" --json isDraft --jq .isDraft)
+          if gh release view "$tag" >/dev/null 2>&1; then
+            draft=$(gh release view "$tag" --json isDraft --jq .isDraft)
             if [[ "$draft" == "true" ]]; then
-              echo "resuming existing draft release $TAG"
+              echo "resuming existing draft release $tag"
             else
-              echo "release $TAG is already published; build jobs will not re-upload"
+              echo "release $tag is already published; build jobs will not re-upload"
               echo "already_published=true" >> "$GITHUB_OUTPUT"
             fi
           else
             notes_body=$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
-              -f tag_name="$TAG" \
+              -f tag_name="$tag" \
               ${prev:+-f previous_tag_name="$prev"} \
               --jq '.body')
             printf 'Build version `SONiC.%s-kamel.%s-%s`\n\n%s\n' \
-              "$BRANCH" "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" "$notes_body" > release-notes.md
+              "$branch" "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" "$notes_body" > release-notes.md
             cat release-notes.md
             # Draft-first: publish only after all assets are uploaded and
             # verified by the release job. An upload failure can never publish
             # an incomplete release, and reruns resume the draft.
-            gh release create "$TAG" \
+            gh release create "$tag" \
               --draft \
               --target "$GITHUB_SHA" \
               --verify-tag \
