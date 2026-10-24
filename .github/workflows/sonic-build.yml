@@ -396,16 +396,18 @@ jobs:
                 echo "SONIC_DPKG_CACHE_SOURCE = $CACHE_SOURCE_INPUT"
               fi
               echo 'SONIC_BUILD_MEMORY = 28g'
-              # The version-control machinery prefers the packages.trafficmanager.net
-              # proxy for pinned web/deb URLs, but it judges reachability by HEAD
-              # and the mirror's GET path hangs (service outage) - so proxy-pinned
-              # fetches stall and kill builds (kernel .dsc/.orig.tar.xz). Point
-              # both proxies at a deterministic DNS failure: every proxy check
-              # fails fast and the machinery falls back to the pinned upstream
-              # URLs (hash-verified; drift is logged and tolerated, like the k8s
-              # release path). Remove these lines when the mirror is healthy.
-              echo 'BUILD_PACKAGES_URL = https://sonic-package-proxy.invalid/packages'
-              echo 'BUILD_PUBLIC_URL = https://sonic-package-proxy.invalid/public'
+              # The k8s release path's package concurrency: 2 concurrent
+              # packages (each -j4). Also narrows a dep-computation race
+              # (Makefile.cache content-hashing a target file while a parallel
+              # job rebuilds it, observed as a transient gbsyncd-broncos
+              # .dep Error 123 with rwcache enabled).
+              echo 'SONIC_CONFIG_BUILD_JOBS = 2'
+              echo 'SONIC_CONFIG_MAKE_JOBS = 4'
+              # NOTE: BUILD_PACKAGES_URL/BUILD_PUBLIC_URL keep their repo
+              # defaults (packages.trafficmanager.net). Package recipes fetch
+              # from the proxy unconditionally (e.g. src/socat/Makefile), so
+              # it cannot be neutralized; the mirror flaps and recovers, and
+              # the version download cache keeps successful fetches warm.
             } > rules/config.user
             cat rules/config.user
           fi
@@ -473,7 +475,7 @@ jobs:
         # straight into the draft release instead of round-tripping 10+ GiB
         # through actions artifacts (which hit digest-mismatch download
         # failures). The release job verifies the manifest and publishes.
-        if: ${{ inputs.create_release && needs.setup.outputs.already_published != 'true' && !cancelled() }}
+        if: ${{ inputs.create_release && needs.setup.outputs.already_published != 'true' && success() }}
         env:
           TARGETS_INPUT: ${{ inputs.targets }}
           ALREADY_PUBLISHED: ${{ needs.setup.outputs.already_published }}
