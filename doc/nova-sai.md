@@ -7,7 +7,7 @@ packets. All SAI switch/port state is fictitious.** This is intended for isolate
 TD3 platform development, not a production image or a functional syncd alternative.
 
 The implementation is in [Nova PR #3](https://github.com/sonix-network/nova-sai/pull/3);
-the helper pins commit `61d9f908fb7acd4b84e7e6a34d595bc364d03439`.
+the helper pins commit `5cdc31697d71ed3cb15738e92aa390d76eeab3b4`.
 
 The stock kernel configuration remains unchanged: CONFIG_RUST stays disabled
 and CONFIG_MODVERSIONS stays enabled. This avoids breaking existing Broadcom
@@ -63,8 +63,12 @@ remove the package (which restores recorded state before removing files).
 
 Validation in Nova includes a C ABI test, a live Thrift/shell test, Rust core
 lifetime tests, mocked activation/rollback tests, and loading/unloading its .ko
-in QEMU with the actual stock SONiC kernel. It has not been activated on a physical
-switch as part of that validation. Run this helper's tests with:
+in QEMU with the actual stock SONiC kernel. The SAI library communicates with
+the Rust driver through a versioned `/dev/nova` ioctl interface. Physical
+installation, SAI operations through the driver, removal/restoration and reinstall
+passed on the isolated TD3 smoketest switch; see the
+[report](https://github.com/sonix-network/nova-sai/blob/5cdc31697d71ed3cb15738e92aa390d76eeab3b4/docs/test/smoketest/nova-install-2026-10-24.md).
+The stock forwarding stack was already disabled on that lab switch. Run this helper's tests with:
 
 ```sh
 python3 -m unittest discover -s scripts/tests -p 'test_build_nova_sai.py'
