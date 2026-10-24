@@ -9,7 +9,10 @@ $(addprefix $(DEST)/, $(MAIN_TARGET)): $(DEST)/% :
 	rm -rf makedumpfile-$(MAKEDUMPFILE_VERSION)*
 
 	# Get makedumpfile release
-	dget https://deb.debian.org/debian/pool/main/m/makedumpfile/makedumpfile_$(MAKEDUMPFILE_VERSION)-$(MAKEDUMPFILE_DEB_REVISION).dsc
+	# The pool removed the 1.7.7-1 source files (superseded upstream); the
+	# snapshot.debian.org archive holds the byte-identical set (md5s match the
+	# versions-web pins).
+	dget http://snapshot.debian.org/archive/debian/20251005T203402Z/pool/main/m/makedumpfile/makedumpfile_$(MAKEDUMPFILE_VERSION)-$(MAKEDUMPFILE_DEB_REVISION).dsc
 	pushd makedumpfile-$(MAKEDUMPFILE_VERSION)
 
 	git init
