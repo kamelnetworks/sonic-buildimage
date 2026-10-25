@@ -1,3 +1,7 @@
+# NOTE: bumped to invalidate the DPKG cache of images built before the
+# post_run_cleanup rsync-purge fix (cached docker-base-trixie.gz lacked
+# runtime rsync, breaking downstream changes-to-image builds).
+# Cache-bump marker: 2026-10-25 rsync-purge-fix
 {% set prefix = DEFAULT_CONTAINER_REGISTRY %}
 {% from "dockers/dockerfile-macros.j2" import install_debian_packages, install_python_wheels, copy_files %}
 ARG BASE={{ prefix }}debian:trixie
