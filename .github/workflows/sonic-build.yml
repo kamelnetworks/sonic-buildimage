@@ -121,12 +121,19 @@ jobs:
       branch: ${{ steps.release.outputs.branch }}
     env:
       PLATFORMS_INPUT: ${{ inputs.platforms }}
+      TARGETS_INPUT: ${{ inputs.targets }}
+      TARGETS_PLATFORM_INPUT: ${{ inputs.targets_platform }}
       GH_TOKEN: ${{ github.token }}
       PRERELEASE_FLAG: ${{ inputs.prerelease && '--prerelease' || '' }}
     steps:
       - name: Build platform matrix
         id: matrix
         run: |
+          # Targets (component) mode builds on one platform only.
+          if [[ -n "$TARGETS_INPUT" ]]; then
+            echo "matrix=[\"$TARGETS_PLATFORM_INPUT\"]" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           IFS=',' read -ra platforms <<< "$PLATFORMS_INPUT"
           json="["
           first=1
