@@ -608,6 +608,20 @@ jobs:
           pattern: 'sonic-buildimage.*'
           merge-multiple: true
           path: release-input
+          # Deterministic: extract the archives ourselves in the next step.
+          # Relying on the action's implicit extraction silently yielded an
+          # empty release-input for v7 archive:true artifacts (run
+          # 40154576857: verify found no uploaded-assets manifest although
+          # the artifact contained it).
+          skip-decompress: true
+
+      - name: Extract build artifacts
+        run: |
+          mkdir -p release-files
+          find release-input -type f -name '*.zip' -print -exec unzip -oq {} -d release-files \;
+          # Anything that came through not-as-zip (older artifact modes).
+          find release-input -type f ! -name '*.zip' -exec cp {} release-files/ \;
+          ls -la release-files/
 
       - name: Verify release assets
         if: ${{ env.ALREADY_PUBLISHED != 'true' }}
@@ -617,7 +631,7 @@ jobs:
           uploaded=$(gh release view "$RELEASE_TAG" --json assets --jq '[.assets[].name] | join(" ")')
           echo "draft assets: $uploaded"
           missing=0
-          expected=$(find release-input -name '*__uploaded-assets.txt' -type f -exec cat {} + | sort -u)
+          expected=$(find release-files -name '*__uploaded-assets.txt' -type f -exec cat {} + | sort -u)
           if [[ -z "$expected" ]]; then
             echo '::error::no build leg recorded uploaded assets'
             exit 1
@@ -636,5 +650,5 @@ jobs:
       - name: Publish release
         if: ${{ env.ALREADY_PUBLISHED != 'true' }}
         run: |
-          gh release edit "$RELEASE_TAG" --draft=false
+          gh release edit "$RELEASE_TAG" --draft=false --title "$RELEASE_TAG"
           gh release view "$RELEASE_TAG" --json isDraft,isPrerelease,assets --jq '{isDraft, isPrerelease, assets: (.assets | length)}'
