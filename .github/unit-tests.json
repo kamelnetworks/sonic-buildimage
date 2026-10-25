@@ -1,0 +1,14 @@
+{
+  "sonic-config-engine": {
+    "image": "target/docker-config-engine-trixie.gz",
+    "pip": ["pytest", "mock", "deepdiff"],
+    "pytest_path": "src/sonic-config-engine/tests",
+    "editable_install": "src/sonic-config-engine"
+  },
+  "sonic-bgpcfgd": {
+    "image": "target/docker-fpm-frr.gz",
+    "pip": ["pytest", "mock", "redis"],
+    "pytest_path": "src/sonic-bgpcfgd/tests",
+    "editable_install": "src/sonic-bgpcfgd"
+  }
+}
