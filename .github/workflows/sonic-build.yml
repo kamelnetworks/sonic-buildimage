@@ -353,39 +353,6 @@ jobs:
           echo "build options: $opts"
           mkdir -p "$PWD/.docklock"
 
-      - name: Slave cache (GHCR pre-pull or reuse opt-in)
-        # The build environment IS the base image (DooD runs on it directly);
-        # rebuilding it costs ~35 min per pod. Persist it on GHCR and reuse:
-        # pre-pull, and on a hit pass SONIC_SLAVE_REUSE_* so make reuses it
-        # (the reuse tag comes from the computed showtag, so the stale-tag
-        # guard in Makefile.work cannot fire). On a miss the normal build
-        # path runs and a later step pushes the fresh image for next time.
-        if: ${{ inputs.slave_cache }}
-        run: |
-          export PATH="$HOME/.local/bin:$PATH"
-          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-          # showtag output must be a strict image:tag ref; make directory
-          # chatter would otherwise poison the ref (and the push step).
-          img_tag=$(MAKEFLAGS=--no-print-directory make NOBOOKWORM=1 $BUILD_OPTS showtag 2>/dev/null | grep -E '^[A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9._-]+$' | tail -1)
-          if [[ ! "$img_tag" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9._-]+$ ]]; then
-            echo "::warning::could not determine the slave image tag from showtag; skipping slave cache"
-            echo "SLAVE_REUSED=false" >> "$GITHUB_ENV"
-            exit 0
-          fi
-          echo "slave image: ghcr.io/kamelnetworks/$img_tag"
-          echo "SLAVE_IMAGE_REF=ghcr.io/kamelnetworks/$img_tag" >> "$GITHUB_ENV"
-          if docker pull "ghcr.io/kamelnetworks/$img_tag"; then
-            opts="$BUILD_OPTS SONIC_SLAVE_REUSE_SLAVE=y"
-            opts="$opts SONIC_SLAVE_REUSE_TRIXIE_IMAGE=ghcr.io/kamelnetworks/$img_tag"
-            opts="$opts SONIC_SLAVE_REUSE_TRIXIE_TAG=${img_tag##*:}"
-            echo "BUILD_OPTS=$opts" >> "$GITHUB_ENV"
-            echo "SLAVE_REUSED=true" >> "$GITHUB_ENV"
-            echo "slave image reused from GHCR"
-          else
-            echo "SLAVE_REUSED=false" >> "$GITHUB_ENV"
-            echo "no cached slave image; the build will produce one"
-          fi
-
       - name: Configure (rules/config.user)
         env:
           CACHE_MODE_INPUT: ${{ inputs.cache_mode }}
@@ -438,15 +405,60 @@ jobs:
             sleep 300
           done
 
+      - name: Slave cache (GHCR pre-pull or reuse opt-in)
+        # Runs AFTER Configure: showtag must see rules/config.user, otherwise
+        # it computes a tag that never matches the image this build produces
+        # (the old pre-Configure tag made the GHCR push warn 'not found' and
+        # reuse never engage). The tag is content-addressed (slave Dockerfile
+        # + generated version pins), so the GHCR ref is stable across runs and
+        # shifts exactly when the slave inputs shift. On a hit, retag the
+        # pulled image to the local name:tag form the Makefile inspects and
+        # pass SONIC_SLAVE_REUSE_*; the reuse tag equals the computed tag, so
+        # Makefile.work's stale-tag guard passes by construction.
+        if: ${{ inputs.slave_cache }}
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          # showtag output must be a strict image:tag ref; make directory
+          # chatter would otherwise poison the ref.
+          img_tag=$(MAKEFLAGS=--no-print-directory make NOBOOKWORM=1 $BUILD_OPTS showtag 2>/dev/null | grep -E '^[A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9._-]+$' | tail -1)
+          if [[ ! "$img_tag" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9._-]+$ ]]; then
+            echo "::warning::could not determine the slave image tag from showtag; skipping slave cache"
+            echo "SLAVE_REUSED=false" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          name=${img_tag%%:*}
+          tag=${img_tag##*:}
+          ghcr_ref="ghcr.io/kamelnetworks/$img_tag"
+          echo "slave base image: $img_tag (GHCR: $ghcr_ref)"
+          echo "SLAVE_IMAGE_REF=$ghcr_ref" >> "$GITHUB_ENV"
+          if docker pull "$ghcr_ref"; then
+            docker tag "$ghcr_ref" "$img_tag"
+            opts="$BUILD_OPTS SONIC_SLAVE_REUSE_SLAVE=y"
+            opts="$opts SONIC_SLAVE_REUSE_TRIXIE_IMAGE=$name"
+            opts="$opts SONIC_SLAVE_REUSE_TRIXIE_TAG=$tag"
+            echo "BUILD_OPTS=$opts" >> "$GITHUB_ENV"
+            echo "SLAVE_REUSED=true" >> "$GITHUB_ENV"
+            echo "slave image reused from GHCR"
+          else
+            echo "SLAVE_REUSED=false" >> "$GITHUB_ENV"
+            echo "no cached slave image; the build will produce one"
+          fi
+
       - name: Push slave image to GHCR (for the next pod)
         # Only when this run had to build it; reuse runs skip.
         if: ${{ inputs.slave_cache && env.SLAVE_REUSED == 'false' && success() }}
         run: |
           export PATH="$HOME/.local/bin:$PATH"
-          if docker image inspect "$SLAVE_IMAGE_REF" >/dev/null 2>&1; then
+          # The build produces the image under its local name:tag; tag the
+          # registry ref from it and push that (docker push needs the
+          # registry-qualified name).
+          local_ref=${SLAVE_IMAGE_REF#ghcr.io/kamelnetworks/}
+          if docker image inspect "$local_ref" >/dev/null 2>&1; then
+            docker tag "$local_ref" "$SLAVE_IMAGE_REF"
             docker push "$SLAVE_IMAGE_REF" && echo "pushed $SLAVE_IMAGE_REF"
           else
-            echo "::warning::slave image $SLAVE_IMAGE_REF not found to push"
+            echo "::warning::slave image $local_ref not found to push"
           fi
 
       - name: Build (debug-tools image + docker-*-dbg.gz)
@@ -594,6 +606,10 @@ jobs:
     timeout-minutes: 30
     env:
       GH_TOKEN: ${{ github.token }}
+      # The release job has no checkout; gh would otherwise resolve the
+      # repository from git and fail with "fatal: not a git repository"
+      # (run 40154576857 Verify release assets).
+      GH_REPO: ${{ github.repository }}
       PLATFORMS_INPUT: ${{ inputs.platforms }}
       TARGETS_INPUT: ${{ inputs.targets }}
       RELEASE_TAG: ${{ needs.setup.outputs.tag }}
