@@ -72,13 +72,13 @@ get_url_version()
 {
     local package_url=$1
     set -o pipefail
-    /usr/bin/curl -Lfks --retry 5 $package_url | md5sum | cut -d' ' -f1
+    /usr/bin/curl -Lfks --retry 5 --max-time 120 $package_url | md5sum | cut -d' ' -f1
 }
 
 check_if_url_exist()
 {
     local url=$1
-    if /usr/bin/curl --output /dev/null --silent --head --fail "$1" > /dev/null 2>&1; then
+    if /usr/bin/curl --output /dev/null --silent --head --fail --max-time 20 "$1" > /dev/null 2>&1; then
         echo y
     else
         echo n
@@ -163,6 +163,8 @@ download_packages()
     local real_version=
     local SRC_FILENAME=
     local DST_FILENAME=
+    local total_urls=0
+    local cache_hits=0
 
     for (( i=0; i<${#parameters[@]}; i++ ))
     do
@@ -173,8 +175,11 @@ download_packages()
         elif [[ "$para" == *://* ]]; then
             local url=$para
             local real_version=
+            local total_urls=$((total_urls + 1))
 
-            # Skip to use the proxy, if the url has already used the proxy server
+            # Skip the version/cache machinery for proxied URLs, but do NOT
+            # skip the download: proxied URLs are never served from the
+            # cache, so they must keep the real command alive below.
             if [[ ! -z "${URL_PREFIX}" && $url == ${URL_PREFIX}* ]]; then
                 continue
             fi
@@ -195,6 +200,7 @@ download_packages()
                             log_info "Loading from web cache URL:${url}, SRC:${SRC_FILENAME}, DST:${DST_FILENAME}"
                             cp "${SRC_FILENAME}" "${DST_FILENAME}"
                             touch "${SRC_FILENAME}"
+                            local cache_hits=$((cache_hits + 1))
                             continue
                         fi
                     fi
@@ -242,9 +248,12 @@ download_packages()
         fi
     done
 
-    # Skip the real command if all the files are loaded from cache
+    # Skip the real command only when EVERY url was served from the cache.
+    # The old check (${#SRC_FILENAMES[@]} -eq 0) silently skipped downloads
+    # whenever all urls were proxy-prefixed (they never enter SRC_FILENAMES),
+    # which made wget/dget "succeed" without fetching anything.
     local result=0
-    if [[ ! -z "$(get_version_cache_option)" && ${#SRC_FILENAMES[@]} -eq 0 ]]; then
+    if [[ ! -z "$(get_version_cache_option)" && ${total_urls} -gt 0 && ${cache_hits} -eq ${total_urls} ]]; then
         return $result
     fi
 
