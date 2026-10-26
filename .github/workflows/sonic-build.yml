@@ -1,0 +1,694 @@
+name: sonic-build
+
+# Port of the Azure DevOps release pipeline (.azure-pipelines/kamel-build.yml)
+# to GitHub Actions on the self-hosted sonic-buildimage runner (ARC scale set,
+# dind sidecar; see kamelnetworks/sonic-buildimage#54, #55).
+#
+# What it does:
+#   - Builds a set of platforms in parallel (matrix) the way the Azure Build
+#     stage did: full image (sonic-<platform>.bin) plus, when requested, the
+#     INSTALL_DEBUG_TOOLS=y image (sonic-<platform>-dbg.bin) whose side
+#     artifacts are the docker-*-dbg.gz debug docker images.
+#   - Creates a GitHub release tagged build-<branch>-<run_number>, titled
+#     <branch>-v<run_number>, prerelease by default (like the Azure
+#     GitHubRelease@1 isPreRelease: true), with release notes
+#     "Build version SONiC.<branch>-kamel.<run_number>-<sha>" plus the commit
+#     changelog against the previous non-draft build-* release, and publishes
+#     the same asset set as build-202411-690:
+#       sonic-<platform>.bin, sonic-<platform>.bin.log,
+#       docker-<platform>-<name>-dbg.tar.gz (renamed from docker-<name>-dbg.gz).
+#     Note: sonic-<platform>-dbg.bin is kept as a CI artifact for debugging but
+#     is NOT published as a release asset (same as the Azure flow).
+#
+# Release-asset flow (draft-first, direct upload):
+#   - The setup job pushes the tag and creates the release as a DRAFT with
+#     notes; the build jobs upload their release assets (all < 2 GiB, the
+#     per-asset cap) straight into the draft. The big-file roundtrip through
+#     actions artifacts is avoided on purpose: 10+ GiB artifact zips hit
+#     digest-mismatch download failures on the artifact server.
+#   - Each build job records the asset names it uploaded in its (small)
+#     artifact; the release job verifies every expected asset against the
+#     draft and only then publishes it. Reruns resume the draft; a published
+#     release is never deleted as a retry mechanism.
+#
+# Deliberate deviations from the Azure flow (documented for #55):
+#   - ENABLE_SBOM=y / ENABLE_SOURCE_ARCHIVE=y are NOT set: release build
+#     202411-690 predates them and its assets do not contain them.
+#   - ENABLE_DOCKER_BASE_PULL=y is NOT set: it needs pull credentials for the
+#     private quay.io/kamelnetworks/* repos. The slave base image is built
+#     locally instead (the kamel-upgrade-versions path proves that works).
+#   - Version control uses the repo default (py2,py3,web,git,docker), like
+#     tools/kubernetes/build.sh - the fork's actual release path. The Azure
+#     pipeline's 'deb' component forces snapshot-pinned debs, and the fork's
+#     committed host-base-image deb pins are stale vs any snapshot (no
+#     version-bump pipeline runs in the fork), which kills the RFS baseimage
+#     build. web/git/docker pinning has hash-verified fallbacks.
+#
+# Runner notes:
+#   - Each job gets a fresh ephemeral pod (minRunners: 0) with a 500 Gi
+#     ephemeral PVC workspace (subPath work) shared runner<->dind; the dind
+#     data-root lives on the same PVC.
+#   - Docker is provided by a dind sidecar; the build uses it via
+#     SONIC_CONFIG_USE_NATIVE_DOCKERD_FOR_BUILD=y (DooD), like
+#     tools/kubernetes/build.sh. Build containers run on --network host:
+#     buildkit-in-dind only supports default/host/none, and the pod netns has
+#     the correct MTU (1450) - the default bridge's 1500 blackholes full-size
+#     packets to PMTUD-hostile edges (GitHub, Azure Front Door).
+
+on:
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: 'Comma-separated platforms to build (broadcom, marvell-teralynx, vs; optional: mellanox)'
+        required: false
+        default: 'broadcom,marvell-teralynx,vs'
+      targets:
+        description: 'Optional whitespace-separated make targets (e.g. target/docker-teamd.gz). Overrides the full-image build.'
+        required: false
+        default: ''
+      targets_platform:
+        description: 'Platform to configure for targets-override builds (component targets like docker-ptf.gz are vs-platform)'
+        required: false
+        default: 'vs'
+      debug_image:
+        description: 'Also build the INSTALL_DEBUG_TOOLS=y image and docker-*-dbg.gz images'
+        required: false
+        type: boolean
+        default: true
+      create_release:
+        description: 'Create a build-<branch>-<run_number> release from the build artifacts'
+        required: false
+        type: boolean
+        default: true
+      prerelease:
+        description: 'Mark the release as prerelease (the Azure pipeline always did)'
+        required: false
+        type: boolean
+        default: true
+      cache_mode:
+        description: 'SONIC_DPKG_CACHE_METHOD (rwcache: compiled-artifact cache on the persistent /var/cache/sonic PVC)'
+        required: false
+        default: 'rwcache'
+      cache_source:
+        description: 'SONIC_DPKG_CACHE_SOURCE host directory (persistent across pods on the runner PVC)'
+        required: false
+        default: '/var/cache/sonic/artifacts'
+      slave_cache:
+        description: 'Reuse/push the slave environment image via GHCR (saves ~35 min per pod when warm)'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: sonic-build
+  cancel-in-progress: false
+  # Default queue semantics replace pending same-group runs; with one
+  # self-hosted runner a pending real release must not be displaced by a
+  # newer dispatch.
+  queue: max
+
+jobs:
+  setup:
+    runs-on: sonic-buildimage
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      tag: ${{ steps.release.outputs.tag }}
+      branch: ${{ steps.release.outputs.branch }}
+    env:
+      PLATFORMS_INPUT: ${{ inputs.platforms }}
+      TARGETS_INPUT: ${{ inputs.targets }}
+      TARGETS_PLATFORM_INPUT: ${{ inputs.targets_platform }}
+      GH_TOKEN: ${{ github.token }}
+      PRERELEASE_FLAG: ${{ inputs.prerelease && '--prerelease' || '' }}
+    steps:
+      - name: Build platform matrix
+        id: matrix
+        run: |
+          # Targets (component) mode builds on one platform only.
+          if [[ -n "$TARGETS_INPUT" ]]; then
+            echo "matrix=[\"$TARGETS_PLATFORM_INPUT\"]" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          IFS=',' read -ra platforms <<< "$PLATFORMS_INPUT"
+          json="["
+          first=1
+          for p in "${platforms[@]}"; do
+            p=$(echo "$p" | tr -d '[:space:]')
+            [[ -z "$p" ]] && continue
+            (( first )) || json+=','
+            json+="\"$p\""
+            first=0
+          done
+          json+="]"
+          echo "matrix=$json" >> "$GITHUB_OUTPUT"
+          echo "platforms: $json"
+
+      - name: Bootstrap gh (not in the runner image)
+        run: |
+          command -v gh >/dev/null || {
+            ver=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"][1:])')
+            echo "installing gh $ver"
+            curl -fsSL -o /tmp/gh.deb "https://github.com/cli/cli/releases/download/v${ver}/gh_${ver}_linux_amd64.deb"
+            sudo dpkg -i /tmp/gh.deb
+          }
+          gh --version
+
+      - name: Checkout (for tagging the built commit)
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+
+      - name: Create draft release
+        id: release
+        if: ${{ inputs.create_release }}
+        run: |
+          branch="${GITHUB_REF_NAME//\//-}"
+          tag="build-${branch}-${GITHUB_RUN_NUMBER}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          echo "BRANCH=$branch" >> "$GITHUB_ENV"
+          # Tag the exact built commit first (the generate-notes endpoint needs
+          # the tag to exist); build-N increments monotonically with the run
+          # number. Reruns force-move the tag onto the same commit.
+          git tag -f "$tag" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$tag"
+          # Like the Azure GitHubRelease@1 (changeLogCompareToRelease:
+          # lastNonDraftRelease): compare against the previous non-draft
+          # build-* release, excluding the tag being published.
+          prev=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '[.[] | select(.draft == false and (.tag_name | startswith("build-")) and .tag_name != "'"$tag"'")][0].tag_name // empty')
+          echo "previous release tag: ${prev:-none}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            draft=$(gh release view "$tag" --json isDraft --jq .isDraft)
+            if [[ "$draft" == "true" ]]; then
+              echo "resuming existing draft release $tag"
+            else
+              echo "release $tag is already published; build jobs will not re-upload"
+              echo "already_published=true" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            notes_body=$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+              -f tag_name="$tag" \
+              ${prev:+-f previous_tag_name="$prev"} \
+              --jq '.body')
+            printf 'Build version `SONiC.%s-kamel.%s-%s`\n\n%s\n' \
+              "$branch" "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" "$notes_body" > release-notes.md
+            cat release-notes.md
+            # Draft-first: publish only after all assets are uploaded and
+            # verified by the release job. An upload failure can never publish
+            # an incomplete release, and reruns resume the draft.
+            gh release create "$tag" \
+              --draft \
+              --target "$GITHUB_SHA" \
+              --verify-tag \
+              --title "${branch}-v${GITHUB_RUN_NUMBER}" \
+              --notes-file release-notes.md \
+              ${PRERELEASE_FLAG}
+          fi
+
+  build:
+    needs: setup
+    runs-on: sonic-buildimage
+    timeout-minutes: 900
+    env:
+      # The fork's current release path (see tools/kubernetes/build.sh): trixie
+      # slave environment, bookworm containers disabled.
+      BLDENV: trixie
+      # Image version parity with the Azure flow (BUILD_NUMBER=Build.BuildId);
+      # sonic_get_version defaults it to 0 without this.
+      BUILD_NUMBER: ${{ github.run_number }}
+      # Transient-failure retries for the make %:: entry point
+      # (scripts/run_with_retry), as the Azure pipeline set them.
+      SONIC_BUILD_RETRY_COUNT: '3'
+      SONIC_BUILD_RETRY_INTERVAL: '600'
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.setup.outputs.tag }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(needs.setup.outputs.matrix) }}
+    steps:
+      - name: Runner environment
+        run: |
+          echo "runner: $RUNNER_NAME on $(hostname)"
+          nproc; free -g
+          df -h "$GITHUB_WORKSPACE"
+          echo "docker root: $(docker info -f '{{.DockerRootDir}}')"
+
+      - name: Bootstrap host tools (make/j2/gh are not in the runner image)
+        # The actions-runner image ships docker (dind socket) but not the
+        # build toolchain; install what the build system needs on the host.
+        run: |
+          missing=''
+          command -v make >/dev/null || missing="$missing make"
+          command -v pip3 >/dev/null || missing="$missing python3-pip"
+          command -v wget >/dev/null || missing="$missing wget"
+          if [[ -n "$missing" ]]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq $missing
+          fi
+          if ! command -v j2 >/dev/null; then
+            # j2 (jinjanator) renders the Dockerfile.j2 templates on the host;
+            # the Azure agents had it preinstalled, the runner image does not.
+            pip3 install --user --break-system-packages jinjanator
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          fi
+          if ! command -v gh >/dev/null; then
+            ver=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"][1:])')
+            echo "installing gh $ver"
+            curl -fsSL -o /tmp/gh.deb "https://github.com/cli/cli/releases/download/v${ver}/gh_${ver}_linux_amd64.deb"
+            sudo dpkg -i /tmp/gh.deb
+          fi
+          # GITHUB_PATH only affects later steps; j2 lives in ~/.local/bin.
+          export PATH="$HOME/.local/bin:$PATH"
+          make --version | head -1
+          j2 --version
+          gh --version | head -1
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: 'recursive'
+
+      - name: Probe dind (workspace bind mounts + nested containers)
+        run: |
+          docker version
+          docker run --rm alpine:3.20 sh -c 'echo hello from nested container'
+          docker run --rm -v "$GITHUB_WORKSPACE:/probe" alpine:3.20 sh -c 'test -f /probe/Makefile.work && echo "dind sees the workspace"'
+
+      - name: Clean previous state (belt-and-braces; pods are ephemeral)
+        run: |
+          docker container prune -f || true
+          docker image prune -af || true
+          docker builder prune -af || true
+          rm -rf "$GITHUB_WORKSPACE/target" "$GITHUB_WORKSPACE"/fsroot.* || true
+          # ARC pods can serve consecutive runs, so the workspace carries over.
+          # actions/checkout does not reset a dirty submodule worktree: autotools
+          # regeneration (libtoolize m4/ltmain.sh, configure scripts) inside
+          # src/<submodule> changed the SMDEP content hashes and therefore every
+          # sairedis-family package cache key, forcing rebuilds each run. Reset
+          # submodules to their pinned commits so dep hashes are stable.
+          git submodule foreach --recursive 'git reset --hard && git clean -ffdx' || true
+          git submodule update --init --recursive || true
+
+      - name: Disk preflight (fail fast, mirrors tools/kubernetes/build.sh)
+        # A full image build writes ~150 GiB; only enforce it when we are
+        # actually building a full image (targets input empty).
+        if: ${{ inputs.targets == '' }}
+        run: |
+          free_kib=$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR == 2 {print $4}')
+          echo "free space: $((free_kib / 1024 / 1024)) GiB"
+          if (( free_kib < 150 * 1024 * 1024 )); then
+            echo '::error::Full image build needs >= 150 GiB free; the runner workspace is smaller. Use targets or give the runner pod more ephemeral storage.'
+            exit 1
+          fi
+
+      - name: Verify dependencies
+        run: |
+          which make
+          which python3
+          docker info
+          export PATH="$HOME/.local/bin:$PATH"
+          which j2
+          j2 --version
+
+      - name: Compute build options
+        env:
+          MATRIX_PLATFORM: ${{ matrix.platform }}
+          TARGETS_INPUT: ${{ inputs.targets }}
+          TARGETS_PLATFORM_INPUT: ${{ inputs.targets_platform }}
+        run: |
+          # Azure buildOptions parity: USERNAME + version control. Package
+          # concurrency stays at the repo's memory-aware default
+          # (min(nproc/4, ram/8) <= 8 via SONIC_BUILD_MEMORY) instead of the
+          # Azure SONIC_BUILD_JOBS=$(nproc), which assumed 150+GB agents.
+          opts="USERNAME=admin"
+          # Version control: the repo default (py2,py3,web,git,docker), i.e.
+          # the same as tools/kubernetes/build.sh - the fork's current release
+          # path (202611 releases). Setting 'deb' too (as the Azure pipeline
+          # did) forces MIRROR_SNAPSHOT=y with deb snapshots, and the fork's
+          # host-base-image version pins are stale vs any snapshot, which
+          # kills the RFS baseimage build. web/git/docker pinning has graceful
+          # fallbacks; deb pinning does not, and the fork has no running
+          # version-bump pipeline.
+          opts="$opts DOCKER_BUILD_NETWORK=host"
+          # The docker save lock dir must live under the workspace: the dind
+          # daemon performs the bind mounts, and a job-container /tmp path is
+          # invisible to it (it would create /tmp/docklock as root in its own
+          # namespace and the slave's touch fails with Permission denied).
+          opts="$opts DOCKER_LOCKDIR=$PWD/.docklock"
+          # Azure adds INCLUDE_DHCP_SERVER=y for the mellanox group.
+          if [[ "$MATRIX_PLATFORM" == mellanox ]]; then
+            opts="$opts INCLUDE_DHCP_SERVER=y"
+          fi
+          echo "BUILD_OPTS=$opts" >> "$GITHUB_ENV"
+          # Used by every later step in this job.
+          echo "MATRIX_PLATFORM=$MATRIX_PLATFORM" >> "$GITHUB_ENV"
+          # Component-target builds (targets override) configure for the
+          # platform the targets belong to (docker-ptf.gz etc. are 'vs').
+          if [[ -n "$TARGETS_INPUT" ]]; then
+            echo "BUILD_PLATFORM=$TARGETS_PLATFORM_INPUT" >> "$GITHUB_ENV"
+          else
+            echo "BUILD_PLATFORM=$MATRIX_PLATFORM" >> "$GITHUB_ENV"
+          fi
+          echo "build options: $opts"
+          mkdir -p "$PWD/.docklock"
+
+      - name: Configure (rules/config.user)
+        env:
+          CACHE_MODE_INPUT: ${{ inputs.cache_mode }}
+          CACHE_SOURCE_INPUT: ${{ inputs.cache_source }}
+        run: |
+          # Do not overwrite an existing local configuration.
+          if [[ -e rules/config.user ]]; then
+            echo "rules/config.user already exists; not overwriting"
+          else
+            # rwcache needs a usable persistent cache dir; fall back to none.
+            cache_mode=$CACHE_MODE_INPUT
+            if [[ "$cache_mode" != none && ( ! -d "$CACHE_SOURCE_INPUT" || ! -w "$CACHE_SOURCE_INPUT" ) ]]; then
+              echo "::warning::cache source $CACHE_SOURCE_INPUT not usable; falling back to cache_mode=none"
+              cache_mode=none
+            fi
+            {
+              echo 'DEFAULT_CONTAINER_REGISTRY = docker.io'
+              echo 'INCLUDE_FIPS = n'
+              echo 'SONIC_CONFIG_USE_NATIVE_DOCKERD_FOR_BUILD = y'
+              echo "SONIC_DPKG_CACHE_METHOD = $cache_mode"
+              if [[ "$cache_mode" != none ]]; then
+                echo "SONIC_DPKG_CACHE_SOURCE = $CACHE_SOURCE_INPUT"
+              fi
+              echo 'SONIC_BUILD_MEMORY = 28g'
+              # The k8s release path's package concurrency: 2 concurrent
+              # packages (each -j4). Also narrows a dep-computation race
+              # (Makefile.cache content-hashing a target file while a parallel
+              # job rebuilds it, observed as a transient gbsyncd-broncos
+              # .dep Error 123 with rwcache enabled).
+              echo 'SONIC_CONFIG_BUILD_JOBS = 2'
+              echo 'SONIC_CONFIG_MAKE_JOBS = 4'
+              # NOTE: BUILD_PACKAGES_URL/BUILD_PUBLIC_URL keep their repo
+              # defaults (packages.trafficmanager.net). Package recipes fetch
+              # from the proxy unconditionally (e.g. src/socat/Makefile), so
+              # it cannot be neutralized; the mirror flaps and recovers, and
+              # the version download cache keeps successful fetches warm.
+            } > rules/config.user
+            cat rules/config.user
+          fi
+
+      - name: Slave cache (GHCR pre-pull or reuse opt-in)
+        # Runs AFTER Configure: showtag must see rules/config.user, otherwise
+        # it computes a tag that never matches the image this build produces
+        # (the old pre-Configure tag made the GHCR push warn 'not found' and
+        # reuse never engage). The tag is content-addressed (slave Dockerfile
+        # + generated version pins), so the GHCR ref is stable across runs and
+        # shifts exactly when the slave inputs shift. On a hit, retag the
+        # pulled image to the local name:tag form the Makefile inspects and
+        # pass SONIC_SLAVE_REUSE_*; the reuse tag equals the computed tag, so
+        # Makefile.work's stale-tag guard passes by construction.
+        if: ${{ inputs.slave_cache }}
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          # showtag output must be a strict image:tag ref; make directory
+          # chatter would otherwise poison the ref.
+          img_tag=$(MAKEFLAGS=--no-print-directory make NOBOOKWORM=1 $BUILD_OPTS showtag 2>/dev/null | grep -E '^[A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9._-]+$' | tail -1)
+          if [[ ! "$img_tag" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9._-]+$ ]]; then
+            echo "::warning::could not determine the slave image tag from showtag; skipping slave cache"
+            echo "SLAVE_REUSED=false" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          name=${img_tag%%:*}
+          tag=${img_tag##*:}
+          ghcr_ref="ghcr.io/kamelnetworks/$img_tag"
+          echo "slave base image: $img_tag (GHCR: $ghcr_ref)"
+          echo "SLAVE_IMAGE_REF=$ghcr_ref" >> "$GITHUB_ENV"
+          if docker pull "$ghcr_ref"; then
+            docker tag "$ghcr_ref" "$img_tag"
+            opts="$BUILD_OPTS SONIC_SLAVE_REUSE_SLAVE=y"
+            opts="$opts SONIC_SLAVE_REUSE_TRIXIE_IMAGE=$name"
+            opts="$opts SONIC_SLAVE_REUSE_TRIXIE_TAG=$tag"
+            echo "BUILD_OPTS=$opts" >> "$GITHUB_ENV"
+            echo "SLAVE_REUSED=true" >> "$GITHUB_ENV"
+            echo "slave image reused from GHCR"
+          else
+            echo "SLAVE_REUSED=false" >> "$GITHUB_ENV"
+            echo "no cached slave image; the build will produce one"
+          fi
+
+      - name: Configure (make)
+        # Runs AFTER the slave-cache pull so SONIC_SLAVE_REUSE_* is part of
+        # $BUILD_OPTS and make configure skips the ~25 min slave build when
+        # the GHCR-cached slave image was reused (run 40218898924: configure
+        # spent 29 min building the slave, then the pull found the same image
+        # on GHCR). make showtag in the slave-cache step already triggered
+        # the parse-time version-control generation, so the tag matches.
+        # Transient mirror/network failures used to kill configure; retry:
+        # it is idempotent. 3 attempts, 5 min apart.
+        run: |
+          attempt=1
+          until make NOBOOKWORM=1 configure PLATFORM=$BUILD_PLATFORM PLATFORM_ARCH=amd64 $BUILD_OPTS; do
+            if (( attempt >= 3 )); then
+              echo '::error::configure failed after 3 attempts'
+              exit 1
+            fi
+            echo "::warning::configure attempt $attempt failed; retrying in 5 min"
+            attempt=$((attempt + 1))
+            sleep 300
+          done
+
+      - name: Push slave image to GHCR (for the next pod)
+        # Only when this run had to build it; reuse runs skip.
+        if: ${{ inputs.slave_cache && env.SLAVE_REUSED == 'false' && success() }}
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          # The build produces the image under its local name:tag; tag the
+          # registry ref from it and push that (docker push needs the
+          # registry-qualified name).
+          local_ref=${SLAVE_IMAGE_REF#ghcr.io/kamelnetworks/}
+          if docker image inspect "$local_ref" >/dev/null 2>&1; then
+            docker tag "$local_ref" "$SLAVE_IMAGE_REF"
+            docker push "$SLAVE_IMAGE_REF" && echo "pushed $SLAVE_IMAGE_REF"
+          else
+            echo "::warning::slave image $local_ref not found to push"
+          fi
+
+      - name: Build (debug-tools image + docker-*-dbg.gz)
+        # Only for full-image builds; a targets override replaces the whole
+        # build, like tools/kubernetes/build.sh does.
+        if: ${{ inputs.debug_image && inputs.targets == '' }}
+        run: |
+          make NOBOOKWORM=1 $BUILD_OPTS INSTALL_DEBUG_TOOLS=y target/sonic-$MATRIX_PLATFORM.bin
+          mv target/sonic-$MATRIX_PLATFORM.bin target/sonic-$MATRIX_PLATFORM-dbg.bin
+
+      - name: Build (final image)
+        if: ${{ inputs.targets == '' }}
+        run: |
+          make NOBOOKWORM=1 $BUILD_OPTS target/sonic-$MATRIX_PLATFORM.bin
+
+      - name: Build (targets override)
+        if: ${{ inputs.targets != '' }}
+        env:
+          TARGETS_INPUT: ${{ inputs.targets }}
+        run: |
+          # Intentional word splitting: TARGETS_INPUT is a make-target list.
+          make NOBOOKWORM=1 $BUILD_OPTS $TARGETS_INPUT
+
+      - name: Check dirty version
+        # Only meaningful after a build; skip when an earlier step failed.
+        if: ${{ success() }}
+        run: |
+          source functions.sh
+          sonic_version=$(sonic_get_version)
+          echo "version: $sonic_version"
+          if [[ "$sonic_version" == *dirty* ]]; then
+            # Warning only for manual branch builds, like the Azure flow.
+            git status --untracked-files=no -s --ignore-submodules || true
+            git diff --ignore-submodules --stat || true
+            echo "::warning::Build version is dirty: $sonic_version"
+          fi
+
+      - name: Upload release assets to the draft
+        # All release assets are < 2 GiB (the per-asset cap): upload them
+        # straight into the draft release instead of round-tripping 10+ GiB
+        # through actions artifacts (which hit digest-mismatch download
+        # failures). The release job verifies the manifest and publishes.
+        if: ${{ inputs.create_release && needs.setup.outputs.already_published != 'true' && success() }}
+        env:
+          TARGETS_INPUT: ${{ inputs.targets }}
+          ALREADY_PUBLISHED: ${{ needs.setup.outputs.already_published }}
+        run: |
+          [[ "$ALREADY_PUBLISHED" == "true" ]] && { echo "release already published; skipping asset upload"; exit 0; }
+          p=$MATRIX_PLATFORM
+          # Release-asset names, Azure MakeRelease parity:
+          #   sonic-<p>.bin / sonic-<p>.bin.log (final build outputs)
+          #   docker-<p>-<name>-dbg.tar.gz   (from target/docker-<name>-dbg.gz)
+          #   component targets verbatim
+          declare -a assets=()
+          add_asset() { # <src> <asset-name>
+            local size
+            size=$(stat -c %s "$1")
+            if (( size >= 2 * 1024 * 1024 * 1024 )); then
+              echo "::error::$1 is $((size / 1024 / 1024)) MiB - over the 2 GiB release-asset cap; cannot publish"
+              exit 1
+            fi
+            echo "$2" >> uploaded-assets.txt
+            assets+=("$1")
+          }
+          : > uploaded-assets.txt
+          if [[ -z "$TARGETS_INPUT" ]]; then
+            [[ -f target/sonic-$p.bin ]] && add_asset target/sonic-$p.bin "sonic-$p.bin"
+            [[ -f target/sonic-$p.bin.log ]] && add_asset target/sonic-$p.bin.log "sonic-$p.bin.log"
+            for f in target/docker-*-dbg.gz; do
+              [[ -e "$f" ]] || continue
+              base=$(basename "$f" .gz)          # docker-<name>-dbg
+              add_asset "$f" "${base/docker-/docker-$p-}.tar.gz"
+            done
+          else
+            for t in $TARGETS_INPUT; do
+              [[ -e "$t" ]] && add_asset "$t" "$(basename "$t")"
+            done
+          fi
+          if (( ${#assets[@]} == 0 )); then
+            echo '::error::nothing collected to publish'
+            exit 1
+          fi
+          # Upload serially; the draft already exists (created by setup).
+          for a in "${assets[@]}"; do
+            name=${a##*/}
+            case "$name" in
+              docker-*-dbg.gz)
+                if [[ -z "$TARGETS_INPUT" ]]; then
+                  # Full build: Azure-parity rename docker-<p>-<name>-dbg.tar.gz
+                  base=${name%.gz}
+                  target_name="assets/${base/docker-/docker-$p-}.tar.gz"
+                else
+                  # Component build: keep the requested target name verbatim.
+                  target_name="assets/$name"
+                fi
+                mkdir -p assets; ln -f "$a" "$target_name"
+                gh release upload "$RELEASE_TAG" "$target_name" --clobber
+                rm -f "$target_name"
+                ;;
+              *)
+                gh release upload "$RELEASE_TAG" "$a" --clobber
+                ;;
+            esac
+          done
+          gh release view "$RELEASE_TAG" --json assets --jq '[.assets[].name] | length'
+
+      - name: Collect build artifacts
+        if: ${{ !cancelled() }}
+        # Small artifact only (manifests, expected-asset list, logs,
+        # debug-installer): the release assets went directly to the draft.
+        # Platform-prefixed flat filenames (<p>__<name>) keep platform
+        # identity independent of the download layout (download-artifact
+        # flattens single-match downloads).
+        env:
+          TARGETS_INPUT: ${{ inputs.targets }}
+        run: |
+          p=$MATRIX_PLATFORM
+          mkdir -p artifact-root
+          [[ -f uploaded-assets.txt ]] && cp -v uploaded-assets.txt "artifact-root/${p}__uploaded-assets.txt"
+          { echo "platform=$p"; echo "targets=$TARGETS_INPUT"; } > "artifact-root/manifest-$p.txt"
+          # Debug-installer kept for debugging (never a release asset).
+          [[ -f target/sonic-$p-dbg.bin ]] && cp -v target/sonic-$p-dbg.bin "artifact-root/${p}__sonic-$p-dbg.bin" || true
+          # Build logs as one tarball so failures stay diagnosable offline -
+          # GitHub drops job log blobs for failed runs occasionally.
+          # rules/functions writes logs next to outputs (target/*.gz.log,
+          # target/debs/**/*.log), so gather every *.log under target/.
+          loglist=$(mktemp)
+          find target -type f -name '*.log' > "$loglist" 2>/dev/null || true
+          tar czf "artifact-root/${p}__buildlogs.tgz" -T "$loglist" 2>/dev/null || true
+          du -sh artifact-root 2>/dev/null
+          ls -lh artifact-root/ | head -60
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: sonic-buildimage.${{ matrix.platform }}
+          path: artifact-root/*
+          retention-days: 14
+
+  release:
+    needs: [setup, build]
+    if: ${{ inputs.create_release && !cancelled() && !failure() }}
+    runs-on: sonic-buildimage
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # The release job has no checkout; gh would otherwise resolve the
+      # repository from git and fail with "fatal: not a git repository"
+      # (run 40154576857 Verify release assets).
+      GH_REPO: ${{ github.repository }}
+      PLATFORMS_INPUT: ${{ inputs.platforms }}
+      TARGETS_INPUT: ${{ inputs.targets }}
+      RELEASE_TAG: ${{ needs.setup.outputs.tag }}
+      ALREADY_PUBLISHED: ${{ needs.setup.outputs.already_published }}
+    steps:
+      - name: Verify dependencies (release job)
+        run: |
+          command -v gh >/dev/null || {
+            ver=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"][1:])')
+            echo "installing gh $ver"
+            curl -fsSL -o /tmp/gh.deb "https://github.com/cli/cli/releases/download/v${ver}/gh_${ver}_linux_amd64.deb"
+            sudo dpkg -i /tmp/gh.deb
+          }
+          gh --version
+
+      - name: Download build artifacts (manifests + logs only)
+        uses: actions/download-artifact@v8
+        with:
+          pattern: 'sonic-buildimage.*'
+          merge-multiple: true
+          path: release-input
+          # Deterministic: extract the archives ourselves in the next step.
+          # Relying on the action's implicit extraction silently yielded an
+          # empty release-input for v7 archive:true artifacts (run
+          # 40154576857: verify found no uploaded-assets manifest although
+          # the artifact contained it).
+          skip-decompress: true
+
+      - name: Extract build artifacts
+        run: |
+          mkdir -p release-files
+          find release-input -type f -name '*.zip' -print -exec unzip -oq {} -d release-files \;
+          # Anything that came through not-as-zip (older artifact modes).
+          find release-input -type f ! -name '*.zip' -exec cp {} release-files/ \;
+          ls -la release-files/
+
+      - name: Verify release assets
+        if: ${{ env.ALREADY_PUBLISHED != 'true' }}
+        run: |
+          # Every build leg recorded the asset names it uploaded; all of them
+          # must be present in the draft before it is published.
+          uploaded=$(gh release view "$RELEASE_TAG" --json assets --jq '[.assets[].name] | join(" ")')
+          echo "draft assets: $uploaded"
+          missing=0
+          expected=$(find release-files -name '*__uploaded-assets.txt' -type f -exec cat {} + | sort -u)
+          if [[ -z "$expected" ]]; then
+            echo '::error::no build leg recorded uploaded assets'
+            exit 1
+          fi
+          for name in $expected; do
+            case " $uploaded " in *" $name "*) ;; *) echo "::error::$name missing from the release" ; missing=1 ;; esac
+          done
+          # Full builds: every platform's installer must be present.
+          if [[ -z "$TARGETS_INPUT" ]]; then
+            for p in $(echo "$PLATFORMS_INPUT" | tr ',' ' '); do
+              case " $uploaded " in *" sonic-$p.bin "*) ;; *) echo "::error::no sonic-$p.bin in the release"; missing=1 ;; esac
+            done
+          fi
+          (( missing )) && exit 1 || true
+
+      - name: Publish release
+        if: ${{ env.ALREADY_PUBLISHED != 'true' }}
+        run: |
+          gh release edit "$RELEASE_TAG" --draft=false --title "$RELEASE_TAG"
+          gh release view "$RELEASE_TAG" --json isDraft,isPrerelease,assets --jq '{isDraft, isPrerelease, assets: (.assets | length)}'
