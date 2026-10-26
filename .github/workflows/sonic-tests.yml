@@ -1,0 +1,258 @@
+# On-demand SONiC test suites (epic #54 / sub-issue #57).
+# Runs on the sonic-buildimage self-hosted runner against the same build
+# environment as the release builds, so unit tests execute against the real
+# runtime docker images produced by this tree (their dependencies ship inside
+# those images), with JUnit XML results and a visible pass/fail summary.
+name: sonic-tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: 'Test suite to run'
+        type: choice
+        default: unit
+        options: [unit, dvs, kvm]
+      packages:
+        description: 'unit suite: comma-separated package keys from .github/unit-tests.json (empty = all)'
+        default: 'sonic-config-engine,sonic-bgpcfgd'
+      slave_cache:
+        description: 'Reuse the GHCR-cached slave image (fall back to building it)'
+        type: boolean
+        default: true
+      cache_mode:
+        description: 'DPKG cache mode (rwcache reuses the persistent cache)'
+        type: choice
+        default: rwcache
+        options: [rwcache, none]
+
+concurrency:
+  group: sonic-tests-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  test:
+    runs-on: sonic-buildimage
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Bootstrap host tools (make/j2/gh are not in the runner image)
+        run: |
+          missing=''
+          command -v make >/dev/null || missing="$missing make"
+          command -v pip3 >/dev/null || missing="$missing python3-pip"
+          command -v wget >/dev/null || missing="$missing wget"
+          if [[ -n "$missing" ]]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq $missing
+          fi
+          if ! command -v j2 >/dev/null; then
+            pip3 install --user --break-system-packages jinjanator
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          fi
+          if ! command -v gh >/dev/null; then
+            ver=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"][1:])')
+            echo "installing gh $ver"
+            curl -fsSL -o /tmp/gh.deb "https://github.com/cli/cli/releases/download/v${ver}/gh_${ver}_linux_amd64.deb"
+            sudo dpkg -i /tmp/gh.deb
+          fi
+
+      - uses: actions/checkout@v7
+
+      - name: Probe dind (workspace bind mounts + nested containers)
+        run: |
+          docker version
+          docker run --rm alpine:3.20 sh -c 'echo hello from nested container'
+          docker run --rm -v "$GITHUB_WORKSPACE:/probe" alpine:3.20 sh -c 'test -f /probe/Makefile.work && echo "dind sees the workspace"'
+
+      - name: Configure (rules/config.user)
+        env:
+          CACHE_MODE_INPUT: ${{ inputs.cache_mode }}
+          CACHE_SOURCE_INPUT: /var/cache/sonic/artifacts
+        run: |
+          # Same configuration as the release builds, so the computed slave
+          # image tag matches the GHCR-cached one.
+          if [[ -e rules/config.user ]]; then
+            echo "rules/config.user already exists; not overwriting"
+          else
+            cache_mode=$CACHE_MODE_INPUT
+            if [[ "$cache_mode" != none && ( ! -d "$CACHE_SOURCE_INPUT" || ! -w "$CACHE_SOURCE_INPUT" ) ]]; then
+              echo "::warning::cache source $CACHE_SOURCE_INPUT not usable; falling back to cache_mode=none"
+              cache_mode=none
+            fi
+            {
+              echo 'DEFAULT_CONTAINER_REGISTRY = docker.io'
+              echo 'INCLUDE_FIPS = n'
+              echo 'SONIC_CONFIG_USE_NATIVE_DOCKERD_FOR_BUILD = y'
+              echo "SONIC_DPKG_CACHE_METHOD = $cache_mode"
+              if [[ "$cache_mode" != none ]]; then
+                echo "SONIC_DPKG_CACHE_SOURCE = $CACHE_SOURCE_INPUT"
+              fi
+              echo 'SONIC_BUILD_MEMORY = 28g'
+              echo 'SONIC_CONFIG_BUILD_JOBS = 2'
+              echo 'SONIC_CONFIG_MAKE_JOBS = 4'
+            } > rules/config.user
+            cat rules/config.user
+          fi
+
+      - name: Slave image (GHCR pre-pull, fallback local build)
+        if: ${{ inputs.slave_cache }}
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          img_tag=$(MAKEFLAGS=--no-print-directory make NOBOOKWORM=1 USERNAME=admin DOCKER_BUILD_NETWORK=host DOCKER_LOCKDIR="$PWD/.docklock" showtag 2>/dev/null | grep -E '^[A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9._-]+$' | tail -1)
+          if [[ ! "$img_tag" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::could not determine the slave image tag from showtag"
+            exit 1
+          fi
+          ghcr_ref="ghcr.io/kamelnetworks/$img_tag"
+          echo "SLAVE_REF=$img_tag" >> "$GITHUB_ENV"
+          echo "slave base image: $img_tag (GHCR: $ghcr_ref)"
+          if docker pull "$ghcr_ref"; then
+            docker tag "$ghcr_ref" "$img_tag"
+            echo "slave image reused from GHCR"
+          else
+            echo "::warning::no cached slave image; building one (this takes a while)"
+            make NOBOOKWORM=1 USERNAME=admin DOCKER_BUILD_NETWORK=host DOCKER_LOCKDIR="$PWD/.docklock" sonic-slave-build
+            test -d /var/cache/sonic/artifacts && docker tag "$img_tag" "$ghcr_ref" || true
+          fi
+
+      - name: Configure (make)
+        # Runs after the slave pull: make configure then finds the slave
+        # image locally (inspect) and skips its ~25 min build.
+        run: |
+          attempt=1
+          until make NOBOOKWORM=1 configure PLATFORM=vs PLATFORM_ARCH=amd64 USERNAME=admin DOCKER_BUILD_NETWORK=host DOCKER_LOCKDIR="$PWD/.docklock"; do
+            if (( attempt >= 3 )); then
+              echo '::error::configure failed after 3 attempts'
+              exit 1
+            fi
+            echo "::warning::configure attempt $attempt failed; retrying in 5 min"
+            attempt=$((attempt + 1))
+            sleep 300
+          done
+
+      - name: KVM capability check (dvs/kvm suites)
+        if: ${{ inputs.suite == 'dvs' || inputs.suite == 'kvm' }}
+        run: |
+          if [[ -c /dev/kvm ]]; then
+            echo "/dev/kvm present; the ${{ inputs.suite }} suite can run"
+          else
+            echo '::error::/dev/kvm is not available on this runner. The dvs/kvm suites need KVM acceleration; request the KVM device for the runner pod (devices.kubevirt.io/kvm) in the ARC runner template, then re-run.'
+            exit 1
+          fi
+
+      - name: Run unit tests
+        if: ${{ inputs.suite == 'unit' }}
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          mkdir -p test-results
+          python3 - <<'PYEOF'
+          import json, os, subprocess, sys
+          cfg = json.load(open('.github/unit-tests.json'))
+          req = os.environ.get('PACKAGES_INPUT', '')
+          wanted = [p.strip() for p in req.split(',') if p.strip()] or sorted(cfg)
+          unknown = [p for p in wanted if p not in cfg]
+          if unknown:
+              print('::error::unknown package(s): ' + ', '.join(unknown))
+              sys.exit(1)
+          json.dump(wanted, open('test-results/.order', 'w'))
+          for pkg in wanted:
+              c = cfg[pkg]
+              print(f"### unit tests for {pkg}")
+              if not os.path.exists(c['image']):
+                  subprocess.run(['make', 'NOBOOKWORM=1', 'USERNAME=admin',
+                                  'DOCKER_BUILD_NETWORK=host',
+                                  'DOCKER_LOCKDIR=' + os.getcwd() + '/.docklock',
+                                  c['image']], check=True)
+              subprocess.run(['docker', 'load', '-i', c['image']], check=True)
+              # The image name inside the .gz is e.g. sonic-docker-config-engine-trixie:<ver>;
+              # find the newest loaded image by repository substring.
+              repo = os.path.basename(c['image'])[:-3]
+              repo = repo.replace('docker-config-engine-trixie', 'docker-config-engine-trixie')
+              out = subprocess.run(['docker', 'images', '--format', '{{.Repository}}:{{.Tag}}'],
+                                   capture_output=True, text=True, check=True).stdout.split()
+              ref = next((r for r in out if r.endswith(repo) or '/' + repo in r), None)
+              if not ref:
+                  ref = next((r for r in out if repo in r.split(':')[0]), None)
+              if not ref:
+                  print('::error::cannot find a loaded image for ' + repo)
+                  sys.exit(1)
+              print('running tests in', ref)
+              # -e installs the CURRENT source (not the image's packaged copy),
+              # so the tests exercise this checkout's code.
+              cmd = (f"pip3 install --no-deps -e /sonic/{c['editable_install']} && "
+                     f"pip3 install {' '.join(c['pip'])} && "
+                     f"python3 -m pytest {c['pytest_path']} -q --junitxml=/sonic/test-results/{pkg}.xml")
+              p = subprocess.run(['docker', 'run', '--rm', '--network', 'host',
+                                  '-v', os.getcwd() + ':/sonic', '-w', '/sonic',
+                                  '-e', 'http_proxy', '-e', 'https_proxy', '-e', 'no_proxy',
+                                  ref, 'bash', '-c', cmd])
+              status = {pkg: ('fail' if p.returncode else 'pass')}
+              print('UNIT_STATUS ' + json.dumps(status))
+              if p.returncode:
+                  os.environ.setdefault('UNIT_FAILED', '1')
+          if os.environ.get('UNIT_FAILED'):
+              sys.exit(1)
+          PYEOF
+        env:
+          PACKAGES_INPUT: ${{ inputs.packages }}
+
+      - name: Test summary
+        if: ${{ always() && inputs.suite == 'unit' }}
+        run: |
+          python3 - <<'PYEOF'
+          import json, xml.etree.ElementTree as ET, os
+          rows = []
+          order = []
+          of = 'test-results/.order'
+          if os.path.exists(of):
+              order = json.load(open(of))
+          import glob
+          for f in glob.glob('test-results/*.xml'):
+              pkg = os.path.basename(f)[:-4]
+              if pkg not in order: order.append(pkg)
+          fails = 0
+          for pkg in order:
+              f = f'test-results/{pkg}.xml'
+              if not os.path.exists(f):
+                  rows.append((pkg, 'no results', 'fail'))
+                  fails += 1
+                  continue
+              t = ET.parse(f).getroot()
+              suite = t if t.tag == 'testsuite' else next(t.iter('testsuite'))
+              tests = int(suite.get('tests', 0))
+              failed = int(suite.get('failures', 0)) + int(suite.get('errors', 0))
+              skipped = int(suite.get('skipped', 0))
+              status = 'PASS' if failed == 0 else 'FAIL'
+              if failed: fails += 1
+              rows.append((pkg, f'{tests} tests, {failed} failed, {skipped} skipped', status))
+          lines = ['| package | result | status |', '|---|---|---|']
+          for pkg, res, status in rows:
+              lines.append(f'| {pkg} | {res} | {status} |')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as s:
+              s.write('## Unit test results\n\n' + '\n'.join(lines) + '\n')
+          if fails:
+              print(f'::error::{fails} package(s) failed their unit tests')
+              raise SystemExit(1)
+          PYEOF
+
+      - name: Upload test results
+        if: ${{ always() && inputs.suite == 'unit' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: sonic-tests-unit-results
+          path: test-results/*
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: DVS suite (placeholder pending KVM access)
+        if: ${{ inputs.suite == 'dvs' }}
+        run: |
+          echo '::error::the dvs suite is implemented behind the KVM capability check; see the kvm suite step for instructions.'
+          exit 1
