@@ -3,6 +3,7 @@
 Run with: python3 -m unittest discover -s tests -p test_release_workflow.py
 Requires PyYAML.
 """
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,7 @@ WORKFLOW = yaml.safe_load(
     (Path(__file__).parents[1] / '.github/workflows/sonic-build.yml').read_text()
 )
 PLATFORMS = ['broadcom', 'marvell-teralynx', 'vs']
+RELEASE_HELPER = Path(__file__).parents[1] / 'scripts/release-assets.sh'
 
 
 def script(job, name):
@@ -93,6 +95,90 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.prepare_assets()
         self.env['MOCK_ASSETS'] = self.env['MOCK_ASSETS'].replace('sonic-vs.bin.log', '')
         self.assertNotEqual(self.verify().returncode, 0)
+
+    def prepare_multipart_installer(self):
+        files = self.prepare_assets()
+        names = ['sonic-vs.bin.part-000', 'sonic-vs.bin.part-001']
+        (files / 'vs__installer-parts.txt').write_text('\n'.join(names) + '\n')
+        names += ['sonic-vs.bin.parts', 'sonic-vs.bin.sha256', 'sonic-vs.bin.log']
+        (files / 'vs__uploaded-assets.txt').write_text('\n'.join(names) + '\n')
+        self.env['MOCK_ASSETS'] = self.env['MOCK_ASSETS'].replace('sonic-vs.bin ', '') + ' ' + ' '.join(names)
+        return files
+
+    def test_complete_multipart_installer_passes(self):
+        self.prepare_multipart_installer()
+        result = self.verify()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_missing_remote_part_blocks_release(self):
+        self.prepare_multipart_installer()
+        self.env['MOCK_ASSETS'] = self.env['MOCK_ASSETS'].replace('sonic-vs.bin.part-001', '')
+        self.assertNotEqual(self.verify().returncode, 0)
+
+    def test_missing_part_from_upload_manifest_blocks_release(self):
+        files = self.prepare_multipart_installer()
+        manifest = files / 'vs__uploaded-assets.txt'
+        manifest.write_text(manifest.read_text().replace('sonic-vs.bin.part-001\n', ''))
+        self.assertNotEqual(self.verify().returncode, 0)
+
+    def test_missing_reassembly_metadata_blocks_release(self):
+        files = self.prepare_multipart_installer()
+        manifest = files / 'vs__uploaded-assets.txt'
+        manifest.write_text(manifest.read_text().replace('sonic-vs.bin.sha256\n', ''))
+        self.assertNotEqual(self.verify().returncode, 0)
+
+    def test_missing_parts_manifest_blocks_release(self):
+        files = self.prepare_multipart_installer()
+        (files / 'vs__installer-parts.txt').unlink()
+        self.assertNotEqual(self.verify().returncode, 0)
+
+    def test_out_of_order_parts_block_release(self):
+        files = self.prepare_multipart_installer()
+        (files / 'vs__installer-parts.txt').write_text('sonic-vs.bin.part-001\nsonic-vs.bin.part-000\n')
+        self.assertNotEqual(self.verify().returncode, 0)
+
+    def test_asset_split_boundary_and_byte_exact_reassembly(self):
+        self.env['RELEASE_HELPER'] = str(RELEASE_HELPER)
+        # Exercise the same splitting path at a small threshold, including
+        # exactly-at-limit files, without allocating multi-gigabyte fixtures.
+        for size in [63, 64, 65, 160]:
+            with self.subTest(size=size):
+                data = bytes(range(size))
+                (self.root / 'input').write_bytes(data)
+                name = f'installer-{size}.bin'
+                self.env['ASSET_NAME'] = name
+                result = self.run_script('source "$RELEASE_HELPER"; prepare_release_asset input "$ASSET_NAME" 64')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                assets = self.root / 'assets'
+                if size < 64:
+                    self.assertEqual((assets / name).read_bytes(), data)
+                    continue
+                names = (assets / f'{name}.parts').read_text().splitlines()
+                self.assertGreaterEqual(len(names), 2)
+                self.assertTrue(all((assets / part).stat().st_size < 64 for part in names))
+                reassembled = b''.join((assets / part).read_bytes() for part in names)
+                self.assertEqual(reassembled, data)
+                self.assertEqual((assets / f'{name}.sha256').read_text(),
+                                 f'{hashlib.sha256(data).hexdigest()}  {name}\n')
+                uploaded = (self.root / 'uploaded-assets.txt').read_text().splitlines()
+                self.assertTrue(set(names + [f'{name}.parts', f'{name}.sha256']).issubset(uploaded))
+
+    def test_upload_stages_installer_log_and_renamed_debug_image(self):
+        scripts = self.root / 'scripts'
+        scripts.mkdir()
+        (scripts / 'release-assets.sh').write_text(RELEASE_HELPER.read_text())
+        target = self.root / 'target'
+        target.mkdir()
+        for name in ['sonic-vs.bin', 'sonic-vs.bin.log', 'docker-syncd-dbg.gz']:
+            (target / name).write_bytes(b'asset data')
+        self.env.update(ALREADY_PUBLISHED='false', MATRIX_PLATFORM='vs', TARGETS_INPUT='', RELEASE_TAG='build-test-42')
+        result = self.run_script('gh() { printf "%s\\n" "$*" >> gh-args; }\n' + script('build', 'Upload release assets to the draft'))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        expected = ['sonic-vs.bin', 'sonic-vs.bin.log', 'docker-vs-syncd-dbg.tar.gz']
+        self.assertEqual((self.root / 'uploaded-assets.txt').read_text().splitlines(), expected)
+        calls = (self.root / 'gh-args').read_text()
+        for name in expected:
+            self.assertIn(f'release upload build-test-42 assets/{name} --clobber', calls)
 
     def test_publish_preserves_branch_version_title(self):
         self.env.update(RELEASE_TAG='build-202611-master-42', RELEASE_TITLE='202611-master-v42')
