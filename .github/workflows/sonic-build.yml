@@ -5,7 +5,8 @@ name: sonic-build
 # dind sidecar; see kamelnetworks/sonic-buildimage#54, #55).
 #
 # What it does:
-#   - Builds a set of platforms in parallel (matrix) the way the Azure Build
+#   - Release builds always build vs, broadcom, and marvell-teralynx in
+#     parallel (matrix), requiring all three to succeed, the way the Azure Build
 #     stage did: full image (sonic-<platform>.bin) plus, when requested, the
 #     INSTALL_DEBUG_TOOLS=y image (sonic-<platform>-dbg.bin) whose side
 #     artifacts are the docker-*-dbg.gz debug docker images.
@@ -59,7 +60,7 @@ on:
   workflow_dispatch:
     inputs:
       platforms:
-        description: 'Comma-separated platforms to build (broadcom, marvell-teralynx, vs; optional: mellanox)'
+        description: 'Non-release builds only: comma-separated platforms. Releases always build broadcom, marvell-teralynx, vs.'
         required: false
         default: 'broadcom,marvell-teralynx,vs'
       targets:
@@ -76,7 +77,7 @@ on:
         type: boolean
         default: true
       create_release:
-        description: 'Create a build-<branch>-<run_number> release from the build artifacts'
+        description: 'Publish <branch>-v<run_number> after all three full-image builds succeed (tag: build-<branch>-<run_number>)'
         required: false
         type: boolean
         default: true
@@ -107,7 +108,7 @@ concurrency:
   group: sonic-build
   cancel-in-progress: false
   # Default queue semantics replace pending same-group runs; with one
-  # self-hosted runner a pending real release must not be displaced by a
+  # runner scale set a pending real release must not be displaced by a
   # newer dispatch.
   queue: max
 
@@ -119,8 +120,10 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       tag: ${{ steps.release.outputs.tag }}
       branch: ${{ steps.release.outputs.branch }}
+      already_published: ${{ steps.release.outputs.already_published }}
     env:
       PLATFORMS_INPUT: ${{ inputs.platforms }}
+      CREATE_RELEASE: ${{ inputs.create_release }}
       TARGETS_INPUT: ${{ inputs.targets }}
       TARGETS_PLATFORM_INPUT: ${{ inputs.targets_platform }}
       GH_TOKEN: ${{ github.token }}
@@ -129,6 +132,16 @@ jobs:
       - name: Build platform matrix
         id: matrix
         run: |
+          # A release always represents all three full-image builds. Custom
+          # platform selections apply only to non-release builds.
+          if [[ "$CREATE_RELEASE" == "true" ]]; then
+            if [[ -n "$TARGETS_INPUT" ]]; then
+              echo '::error::Release builds require full images; clear targets or set create_release=false.'
+              exit 1
+            fi
+            echo 'matrix=["broadcom","marvell-teralynx","vs"]' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # Targets (component) mode builds on one platform only.
           if [[ -n "$TARGETS_INPUT" ]]; then
             echo "matrix=[\"$TARGETS_PLATFORM_INPUT\"]" >> "$GITHUB_OUTPUT"
@@ -231,6 +244,9 @@ jobs:
       RELEASE_TAG: ${{ needs.setup.outputs.tag }}
     strategy:
       fail-fast: false
+      # The ARC scale set must provide at least three runners for all release
+      # legs to execute simultaneously. No leg depends on another.
+      max-parallel: 3
       matrix:
         platform: ${{ fromJSON(needs.setup.outputs.matrix) }}
     steps:
@@ -618,7 +634,7 @@ jobs:
 
   release:
     needs: [setup, build]
-    if: ${{ inputs.create_release && !cancelled() && !failure() }}
+    if: ${{ inputs.create_release && !cancelled() && needs.setup.result == 'success' && needs.build.result == 'success' }}
     runs-on: sonic-buildimage
     timeout-minutes: 30
     env:
@@ -627,8 +643,8 @@ jobs:
       # repository from git and fail with "fatal: not a git repository"
       # (run 40154576857 Verify release assets).
       GH_REPO: ${{ github.repository }}
-      PLATFORMS_INPUT: ${{ inputs.platforms }}
-      TARGETS_INPUT: ${{ inputs.targets }}
+      RELEASE_PLATFORMS: broadcom marvell-teralynx vs
+      RELEASE_TITLE: ${{ needs.setup.outputs.branch }}-v${{ github.run_number }}
       RELEASE_TAG: ${{ needs.setup.outputs.tag }}
       ALREADY_PUBLISHED: ${{ needs.setup.outputs.already_published }}
     steps:
@@ -671,24 +687,27 @@ jobs:
           uploaded=$(gh release view "$RELEASE_TAG" --json assets --jq '[.assets[].name] | join(" ")')
           echo "draft assets: $uploaded"
           missing=0
-          expected=$(find release-files -name '*__uploaded-assets.txt' -type f -exec cat {} + | sort -u)
-          if [[ -z "$expected" ]]; then
-            echo '::error::no build leg recorded uploaded assets'
-            exit 1
-          fi
-          for name in $expected; do
-            case " $uploaded " in *" $name "*) ;; *) echo "::error::$name missing from the release" ; missing=1 ;; esac
+          for p in $RELEASE_PLATFORMS; do
+            manifest="release-files/${p}__uploaded-assets.txt"
+            if [[ ! -s "$manifest" ]]; then
+              echo "::error::no uploaded-assets manifest for $p"
+              missing=1
+              continue
+            fi
+            # Require evidence from this run, even if a resumed draft already
+            # contains an installer uploaded by an earlier attempt.
+            if ! grep -Fxq "sonic-$p.bin" "$manifest"; then
+              echo "::error::no sonic-$p.bin recorded by $p"
+              missing=1
+            fi
+            while IFS= read -r name; do
+              case " $uploaded " in *" $name "*) ;; *) echo "::error::$name missing from the release"; missing=1 ;; esac
+            done < "$manifest"
           done
-          # Full builds: every platform's installer must be present.
-          if [[ -z "$TARGETS_INPUT" ]]; then
-            for p in $(echo "$PLATFORMS_INPUT" | tr ',' ' '); do
-              case " $uploaded " in *" sonic-$p.bin "*) ;; *) echo "::error::no sonic-$p.bin in the release"; missing=1 ;; esac
-            done
-          fi
           (( missing )) && exit 1 || true
 
       - name: Publish release
         if: ${{ env.ALREADY_PUBLISHED != 'true' }}
         run: |
-          gh release edit "$RELEASE_TAG" --draft=false --title "$RELEASE_TAG"
+          gh release edit "$RELEASE_TAG" --draft=false --title "$RELEASE_TITLE"
           gh release view "$RELEASE_TAG" --json isDraft,isPrerelease,assets --jq '{isDraft, isPrerelease, assets: (.assets | length)}'
