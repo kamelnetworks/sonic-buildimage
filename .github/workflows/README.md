@@ -36,3 +36,22 @@ B -- NO --> STOP
 B1 -- NO --> STOP
 B2 -- NO --> STOP
 ```
+
+## Build releases
+
+`sonic-build.yml` publishes only after VS, Broadcom, and Teralynx all build
+successfully and all recorded release assets are present. The release title
+is `<branch>-v<run_number>`; its tag is `build-<branch>-<run_number>`.
+
+GitHub release assets must be smaller than 2 GiB. Larger files are split into
+1,900 MiB numbered parts, with a `.parts` file listing their order and a
+`.sha256` file containing the original file's checksum. Download all matching
+parts and both metadata files into one directory, then reconstruct the file:
+
+```sh
+cat $(cat sonic-vs.bin.parts) > sonic-vs.bin
+sha256sum -c sonic-vs.bin.sha256
+```
+
+The reconstructed installer is byte-for-byte identical to the build output.
+Files below the limit retain their existing asset names.

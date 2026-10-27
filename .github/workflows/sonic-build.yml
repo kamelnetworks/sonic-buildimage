@@ -23,8 +23,8 @@ name: sonic-build
 #
 # Release-asset flow (draft-first, direct upload):
 #   - The setup job pushes the tag and creates the release as a DRAFT with
-#     notes; the build jobs upload their release assets (all < 2 GiB, the
-#     per-asset cap) straight into the draft. The big-file roundtrip through
+#     notes; the build jobs split assets >= 2 GiB into numbered parts and
+#     upload straight into the draft. The big-file roundtrip through
 #     actions artifacts is avoided on purpose: 10+ GiB artifact zips hit
 #     digest-mismatch download failures on the artifact server.
 #   - Each build job records the asset names it uploaded in its (small)
@@ -212,6 +212,12 @@ jobs:
               --jq '.body')
             printf 'Build version `SONiC.%s-kamel.%s-%s`\n\n%s\n' \
               "$branch" "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" "$notes_body" > release-notes.md
+            printf '%s\n' '' \
+              'Assets >= 2 GiB are split into numbered parts. Download all parts and the matching `.parts` and `.sha256` files. For example, reassemble VS with:' \
+              '' '```sh' \
+              'cat $(cat sonic-vs.bin.parts) > sonic-vs.bin' \
+              'sha256sum -c sonic-vs.bin.sha256' \
+              '```' >> release-notes.md
             cat release-notes.md
             # Draft-first: publish only after all assets are uploaded and
             # verified by the release job. An upload failure can never publish
@@ -530,7 +536,7 @@ jobs:
           fi
 
       - name: Upload release assets to the draft
-        # All release assets are < 2 GiB (the per-asset cap): upload them
+        # Split oversized files below the 2 GiB per-asset cap, then upload
         # straight into the draft release instead of round-tripping 10+ GiB
         # through actions artifacts (which hit digest-mismatch download
         # failures). The release job verifies the manifest and publishes.
@@ -545,62 +551,30 @@ jobs:
           #   sonic-<p>.bin / sonic-<p>.bin.log (final build outputs)
           #   docker-<p>-<name>-dbg.tar.gz   (from target/docker-<name>-dbg.gz)
           #   component targets verbatim
-          declare -a assets=()
-          add_asset() { # <src> <asset-name>
-            local size
-            size=$(stat -c %s "$1")
-            if (( size >= 2 * 1024 * 1024 * 1024 )); then
-              # GitHub's per-asset cap is a hard 2 GiB; oversized files
-              # (sonic-vs.bin is 2477 MiB) are skipped with a warning and
-              # recorded in skipped-assets.txt so the verify step warns
-              # instead of failing the release.
-              echo "::warning::$1 is $((size / 1024 / 1024)) MiB - over GitHub's 2 GiB per-asset limit; not publishing it"
-              echo "$2" >> skipped-assets.txt
-              return 0
-            fi
-            assets+=("$1")
-          }
+          source scripts/release-assets.sh
           : > uploaded-assets.txt
-          : > skipped-assets.txt
           if [[ -z "$TARGETS_INPUT" ]]; then
-            [[ -f target/sonic-$p.bin ]] && add_asset target/sonic-$p.bin "sonic-$p.bin"
-            [[ -f target/sonic-$p.bin.log ]] && add_asset target/sonic-$p.bin.log "sonic-$p.bin.log"
+            [[ -f target/sonic-$p.bin ]] && prepare_release_asset target/sonic-$p.bin "sonic-$p.bin"
+            [[ -f target/sonic-$p.bin.log ]] && prepare_release_asset target/sonic-$p.bin.log "sonic-$p.bin.log"
             for f in target/docker-*-dbg.gz; do
               [[ -e "$f" ]] || continue
               base=$(basename "$f" .gz)          # docker-<name>-dbg
-              add_asset "$f" "${base/docker-/docker-$p-}.tar.gz"
+              prepare_release_asset "$f" "${base/docker-/docker-$p-}.tar.gz"
             done
           else
             for t in $TARGETS_INPUT; do
-              [[ -e "$t" ]] && add_asset "$t" "$(basename "$t")"
+              [[ -e "$t" ]] && prepare_release_asset "$t" "$(basename "$t")"
             done
           fi
-          if (( ${#assets[@]} == 0 )); then
+          if [[ ! -s uploaded-assets.txt ]]; then
             echo '::error::nothing collected to publish'
             exit 1
           fi
-          # Upload serially; the draft already exists (created by setup).
-          for a in "${assets[@]}"; do
-            name=${a##*/}
-            case "$name" in
-              docker-*-dbg.gz)
-                if [[ -z "$TARGETS_INPUT" ]]; then
-                  # Full build: Azure-parity rename docker-<p>-<name>-dbg.tar.gz
-                  base=${name%.gz}
-                  target_name="assets/${base/docker-/docker-$p-}.tar.gz"
-                else
-                  # Component build: keep the requested target name verbatim.
-                  target_name="assets/$name"
-                fi
-                mkdir -p assets; ln -f "$a" "$target_name"
-                gh release upload "$RELEASE_TAG" "$target_name" --clobber && echo "${target_name##*/}" >> uploaded-assets.txt
-                rm -f "$target_name"
-                ;;
-              *)
-                gh release upload "$RELEASE_TAG" "$a" --clobber && echo "$name" >> uploaded-assets.txt
-                ;;
-            esac
-          done
+          # Upload exactly the files recorded in the manifest, including all
+          # parts, reassembly lists, and checksums for oversized assets.
+          while IFS= read -r name; do
+            gh release upload "$RELEASE_TAG" "assets/$name" --clobber
+          done < uploaded-assets.txt
           gh release view "$RELEASE_TAG" --json assets --jq '[.assets[].name] | length'
 
       - name: Collect build artifacts
@@ -616,7 +590,7 @@ jobs:
           p=$MATRIX_PLATFORM
           mkdir -p artifact-root
           [[ -f uploaded-assets.txt ]] && cp -v uploaded-assets.txt "artifact-root/${p}__uploaded-assets.txt"
-          [[ -f skipped-assets.txt ]] && cp -v skipped-assets.txt "artifact-root/${p}__skipped-assets.txt"
+          [[ -f assets/sonic-$p.bin.parts ]] && cp -v "assets/sonic-$p.bin.parts" "artifact-root/${p}__installer-parts.txt"
           { echo "platform=$p"; echo "targets=$TARGETS_INPUT"; } > "artifact-root/manifest-$p.txt"
           # Debug-installer kept for debugging (never a release asset).
           [[ -f target/sonic-$p-dbg.bin ]] && cp -v target/sonic-$p-dbg.bin "artifact-root/${p}__sonic-$p-dbg.bin" || true
@@ -700,13 +674,36 @@ jobs:
               missing=1
               continue
             fi
-            # Installers over GitHub's 2 GiB per-asset cap are skipped and
-            # recorded; require them only when they were not skipped.
-            if grep -Fxq "sonic-$p.bin" "release-files/${p}__skipped-assets.txt" 2>/dev/null; then
-              echo "::warning::sonic-$p.bin exceeds GitHub's 2 GiB per-asset limit; it is not in this release"
-            elif ! grep -Fxq "sonic-$p.bin" "$manifest"; then
-              echo "::error::no sonic-$p.bin recorded by $p"
-              missing=1
+            # Require evidence from this run, even if a resumed draft already
+            # contains an installer uploaded by an earlier attempt.
+            if ! grep -Fxq "sonic-$p.bin" "$manifest"; then
+              parts="release-files/${p}__installer-parts.txt"
+              if [[ ! -s "$parts" ]]; then
+                echo "::error::no sonic-$p.bin or multipart installer recorded by $p"
+                missing=1
+                continue
+              fi
+              # Require the reassembly metadata and every numbered part, in
+              # order, from this attempt. Missing parts must block publication.
+              index=0
+              while IFS= read -r name; do
+                printf -v expected_part 'sonic-%s.bin.part-%03d' "$p" "$index"
+                if [[ "$name" != "$expected_part" ]] || ! grep -Fxq "$name" "$manifest"; then
+                  echo "::error::missing or out-of-order installer part: $expected_part"
+                  missing=1
+                fi
+                index=$((index + 1))
+              done < "$parts"
+              for name in "sonic-$p.bin.parts" "sonic-$p.bin.sha256"; do
+                if ! grep -Fxq "$name" "$manifest"; then
+                  echo "::error::missing multipart installer metadata: $name"
+                  missing=1
+                fi
+              done
+              if (( index < 2 )); then
+                echo "::error::multipart installer for $p must contain at least two parts"
+                missing=1
+              fi
             fi
             while IFS= read -r name; do
               case " $uploaded " in *" $name "*) ;; *) echo "::error::$name missing from the release"; missing=1 ;; esac
