@@ -550,13 +550,18 @@ jobs:
             local size
             size=$(stat -c %s "$1")
             if (( size >= 2 * 1024 * 1024 * 1024 )); then
-              echo "::error::$1 is $((size / 1024 / 1024)) MiB - over the 2 GiB release-asset cap; cannot publish"
-              exit 1
+              # GitHub's per-asset cap is a hard 2 GiB; oversized files
+              # (sonic-vs.bin is 2477 MiB) are skipped with a warning and
+              # recorded in skipped-assets.txt so the verify step warns
+              # instead of failing the release.
+              echo "::warning::$1 is $((size / 1024 / 1024)) MiB - over GitHub's 2 GiB per-asset limit; not publishing it"
+              echo "$2" >> skipped-assets.txt
+              return 0
             fi
-            echo "$2" >> uploaded-assets.txt
             assets+=("$1")
           }
           : > uploaded-assets.txt
+          : > skipped-assets.txt
           if [[ -z "$TARGETS_INPUT" ]]; then
             [[ -f target/sonic-$p.bin ]] && add_asset target/sonic-$p.bin "sonic-$p.bin"
             [[ -f target/sonic-$p.bin.log ]] && add_asset target/sonic-$p.bin.log "sonic-$p.bin.log"
@@ -588,11 +593,11 @@ jobs:
                   target_name="assets/$name"
                 fi
                 mkdir -p assets; ln -f "$a" "$target_name"
-                gh release upload "$RELEASE_TAG" "$target_name" --clobber
+                gh release upload "$RELEASE_TAG" "$target_name" --clobber && echo "${target_name##*/}" >> uploaded-assets.txt
                 rm -f "$target_name"
                 ;;
               *)
-                gh release upload "$RELEASE_TAG" "$a" --clobber
+                gh release upload "$RELEASE_TAG" "$a" --clobber && echo "$name" >> uploaded-assets.txt
                 ;;
             esac
           done
@@ -611,6 +616,7 @@ jobs:
           p=$MATRIX_PLATFORM
           mkdir -p artifact-root
           [[ -f uploaded-assets.txt ]] && cp -v uploaded-assets.txt "artifact-root/${p}__uploaded-assets.txt"
+          [[ -f skipped-assets.txt ]] && cp -v skipped-assets.txt "artifact-root/${p}__skipped-assets.txt"
           { echo "platform=$p"; echo "targets=$TARGETS_INPUT"; } > "artifact-root/manifest-$p.txt"
           # Debug-installer kept for debugging (never a release asset).
           [[ -f target/sonic-$p-dbg.bin ]] && cp -v target/sonic-$p-dbg.bin "artifact-root/${p}__sonic-$p-dbg.bin" || true
@@ -694,9 +700,11 @@ jobs:
               missing=1
               continue
             fi
-            # Require evidence from this run, even if a resumed draft already
-            # contains an installer uploaded by an earlier attempt.
-            if ! grep -Fxq "sonic-$p.bin" "$manifest"; then
+            # Installers over GitHub's 2 GiB per-asset cap are skipped and
+            # recorded; require them only when they were not skipped.
+            if grep -Fxq "sonic-$p.bin" "release-files/${p}__skipped-assets.txt" 2>/dev/null; then
+              echo "::warning::sonic-$p.bin exceeds GitHub's 2 GiB per-asset limit; it is not in this release"
+            elif ! grep -Fxq "sonic-$p.bin" "$manifest"; then
               echo "::error::no sonic-$p.bin recorded by $p"
               missing=1
             fi

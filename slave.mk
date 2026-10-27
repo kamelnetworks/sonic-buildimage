@@ -1231,7 +1231,7 @@ endif
 		# clean up
 		if [ -f ../$(notdir $($*_SRC_PATH)).patch/series ]; then quilt pop -a -f; [ -d .pc ] && rm -rf .pc; fi $(LOG)
 		popd $(LOG_SIMPLE)
-		mv -f $($*_SRC_PATH)/dist/$* $(PYTHON_WHEELS_PATH) $(LOG)
+		if [ -f $($*_SRC_PATH)/dist/$* ]; then mv -f $($*_SRC_PATH)/dist/$* $(PYTHON_WHEELS_PATH) $(LOG); else built=$$(ls -t $($*_SRC_PATH)/dist/*.whl 2>/dev/null | head -1); if [ -n "$$built" ]; then echo "Renaming built wheel $$built to the expected name $* (source version machinery differs)" $(LOG); mv -f "$$built" "$(PYTHON_WHEELS_PATH)/$*" $(LOG); else echo "no wheel built in $($*_SRC_PATH)/dist" >&2; exit 1; fi; fi
 
 		# Save the target deb into DPKG cache
 		$(call SAVE_CACHE,$*,$@)

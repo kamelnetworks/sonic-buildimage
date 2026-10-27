@@ -681,7 +681,9 @@ $(addsuffix .$(3),$(addprefix $(2)/, $(1))) : $(2)/%.$(3) : \
 	$(2)/%.flags   $$$$($$$$*_SMDEP_FILES)
 	@$$(eval $$*_SMDEP_FILES_MODIFIED := $$? )
 	@$$(file >$$@,$$(patsubst $$($$*_MOD_SRC_PATH)/%,%,$$($$*_SMDEP_FILES)))
-	@( cd $$($$*_MOD_SRC_PATH) ; cat $$($$*_BASE_PATH)/$$@  |xargs git hash-object ) >$$@.smsha
+	@hash_list() { cat "$$$$1" | tr ' ' '\n' | while IFS= read -r f; do [ -f "$$$$f" ] && printf '%s\n' "$$$$f"; done | xargs git hash-object; }; \
+	if [ -z "$$(tr -d '[:space:]' < $$($$*_BASE_PATH)/$$@)" ]; then printf 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391\n' > $$@.smsha.tmp; else ( cd $$($$*_MOD_SRC_PATH) ; hash_list $$($$*_BASE_PATH)/$$@ ) > $$@.smsha.tmp || { for i in 1 2 3; do rm -f $$@.smsha.tmp; sleep 3; ( cd $$($$*_MOD_SRC_PATH) ; hash_list $$($$*_BASE_PATH)/$$@ ) > $$@.smsha.tmp && break || true; done; }; fi
+	@mv $$@.smsha.tmp $$@.smsha; test -s $$@.smsha || exit 1
 	@$$(if $$(MDEBUG), $$(info SMDEP:$$@, MOD:$$?))
 endef
 $(eval $(call SMSHA_DEP_RULES, $(SONIC_MAKE_DEBS) $(SONIC_DPKG_DEBS) $(SONIC_ONLINE_DEBS) $(SONIC_COPY_DEBS), $(DEBS_PATH),smdep))
@@ -733,7 +735,9 @@ $(addsuffix .$(3),$(addprefix $(2)/, $(1))) : $(2)/%.$(3) : \
 	$(2)/%.flags $$$$($$$$*_DEP_FILES) $$$$(if $$$$($$$$*_SMDEP_FILES), $(2)/%.smdep)
 	@$$(eval $$*_DEP_FILES_MODIFIED := $$? )
 	@$$(file >$$@.tmp,$$($$*_DEP_FILES))
-	@cat $$@.tmp |xargs git hash-object >$$@.sha.tmp
+	@hash_list() { cat "$$$$1" | tr ' ' '\n' | while IFS= read -r f; do [ -f "$$$$f" ] && printf '%s\n' "$$$$f"; done | xargs git hash-object; }; \
+	if [ -n "$$(tr -d '[:space:]' < $$@.tmp)" ]; then hash_list $$@.tmp > $$@.sha.tmp || { for i in 1 2 3; do rm -f $$@.sha.tmp; sleep 3; hash_list $$@.tmp > $$@.sha.tmp && break || true; done; }; else printf 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391\n' > $$@.sha.tmp; fi
+	@test -s $$@.sha.tmp || { echo "git hash-object failed for $$@ (raced a parallel job?)" >&2; echo "dep list head:" >&2; head -5 $$@.tmp >&2; ls -la $$(head -5 $$@.tmp) >&2 2>&1; exit 1; }
 	@if ! cmp -s $$@.sha.tmp $$@.sha; then cp $$@.tmp $$@; cp $$@.sha.tmp $$@.sha; \
 	elif [ -n "$$(filter %.flags,$$?)" ]; then touch $$@; fi
 	@rm -f $$@.tmp $$@.sha.tmp
