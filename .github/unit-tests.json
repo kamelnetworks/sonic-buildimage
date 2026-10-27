@@ -1,14 +1,32 @@
 {
   "sonic-config-engine": {
     "image": "target/docker-config-engine-trixie.gz",
-    "pip": ["pytest", "mock", "deepdiff"],
-    "pytest_path": "src/sonic-config-engine/tests",
-    "editable_install": "src/sonic-config-engine"
+    "pip": [
+      "pytest",
+      "mock",
+      "deepdiff",
+      "mockredispy"
+    ],
+    "apt": [
+      "sudo"
+    ],
+    "workdir": "src/sonic-config-engine",
+    "pytest_path": "tests",
+    "editable_install": "src/sonic-config-engine",
+    "wheels": [
+      "swsssdk"
+    ]
   },
   "sonic-bgpcfgd": {
     "image": "target/docker-fpm-frr.gz",
-    "pip": ["pytest", "mock", "redis"],
-    "pytest_path": "src/sonic-bgpcfgd/tests",
+    "pip": [
+      "pytest",
+      "pytest-cov",
+      "mock",
+      "redis"
+    ],
+    "workdir": "src/sonic-bgpcfgd",
+    "pytest_path": "tests",
     "editable_install": "src/sonic-bgpcfgd"
   }
 }

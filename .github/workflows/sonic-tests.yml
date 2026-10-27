@@ -63,6 +63,11 @@ jobs:
           fi
 
       - uses: actions/checkout@v7
+        with:
+          # The image builds consume the source submodules (sonic-swss-common,
+          # redis-dump-load, ...); the first proof run (40288138188) failed in
+          # the dep-hash machinery because its submodule dirs were empty.
+          submodules: 'recursive'
 
       - name: Probe dind (workspace bind mounts + nested containers)
         run: |
@@ -166,10 +171,15 @@ jobs:
               c = cfg[pkg]
               print(f"### unit tests for {pkg}")
               if not os.path.exists(c['image']):
-                  subprocess.run(['make', 'NOBOOKWORM=1', 'USERNAME=admin',
-                                  'DOCKER_BUILD_NETWORK=host',
-                                  'DOCKER_LOCKDIR=' + os.getcwd() + '/.docklock',
-                                  c['image']], check=True)
+                  mk = ['make', 'NOBOOKWORM=1', 'USERNAME=admin',
+                        'DOCKER_BUILD_NETWORK=host',
+                        'DOCKER_LOCKDIR=' + os.getcwd() + '/.docklock',
+                        c['image']]
+                  # Transient dep-hash races under parallel make: retry once.
+                  p = subprocess.run(mk)
+                  if p.returncode:
+                      print('::warning::make failed (rc=%d); retrying once' % p.returncode)
+                      subprocess.run(mk, check=True)
               subprocess.run(['docker', 'load', '-i', c['image']], check=True)
               # The image name inside the .gz is e.g. sonic-docker-config-engine-trixie:<ver>;
               # find the newest loaded image by repository substring.
@@ -185,17 +195,41 @@ jobs:
                   sys.exit(1)
               print('running tests in', ref)
               # -e installs the CURRENT source (not the image's packaged copy),
-              # so the tests exercise this checkout's code.
-              cmd = (f"pip3 install --no-deps -e /sonic/{c['editable_install']} && "
+              # so the tests exercise this checkout's code. Tests run with the
+              # package dir as cwd (the scripts resolve helpers like
+              # tests/mock_tables relative to it).
+              apt = 'apt-get update -qq && apt-get install -y -qq ' + ' '.join(c.get('apt', [])) + ' && ' if c.get('apt') else ''
+              whls = ' '.join(f"/sonic/target/python-wheels/trixie/{w}-*.whl" for w in c.get('wheels', []))
+              whlcmd = f"pip3 install --no-deps {whls} && " if whls else ''
+              cmd = (apt + whlcmd +
+                     f"pip3 install --no-deps -e /sonic/{c['editable_install']} && "
                      f"pip3 install {' '.join(c['pip'])} && "
                      f"python3 -m pytest {c['pytest_path']} -q --junitxml=/sonic/test-results/{pkg}.xml")
+              # Some images (docker-fpm-frr) have an ENTRYPOINT that ignores
+              # the command and runs the container startup instead (observed
+              # as a false pass in run 40427590835); override it explicitly.
               p = subprocess.run(['docker', 'run', '--rm', '--network', 'host',
-                                  '-v', os.getcwd() + ':/sonic', '-w', '/sonic',
+                                  '--entrypoint', '/bin/bash',
+                                  '-v', os.getcwd() + ':/sonic',
+                                  '-w', '/sonic/' + c.get('workdir', '.'),
                                   '-e', 'http_proxy', '-e', 'https_proxy', '-e', 'no_proxy',
-                                  ref, 'bash', '-c', cmd])
-              status = {pkg: ('fail' if p.returncode else 'pass')}
-              print('UNIT_STATUS ' + json.dumps(status))
-              if p.returncode:
+                                  ref, '-c', cmd])
+              # A pass requires a fresh JUnit with an actual test count;
+              # anything else (missing results, zero tests) is a failure.
+              import xml.etree.ElementTree as ET
+              junit = f"test-results/{pkg}.xml"
+              try:
+                  root = ET.parse(junit).getroot()
+                  suite = root if root.tag == 'testsuite' else next(root.iter('testsuite'))
+                  tests = int(suite.get('tests', '0'))
+              except Exception:
+                  tests = 0
+              if p.returncode == 0 and tests > 0:
+                  status = {pkg: 'pass'}
+                  print('UNIT_STATUS ' + json.dumps(status))
+              else:
+                  print('UNIT_STATUS {"' + pkg + '": "fail"} (rc=%d, tests=%d)' % (p.returncode, tests))
+              if p.returncode or tests == 0:
                   os.environ.setdefault('UNIT_FAILED', '1')
           if os.environ.get('UNIT_FAILED'):
               sys.exit(1)
