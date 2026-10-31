@@ -561,7 +561,7 @@ static struct cls_xcvr_platform_data xcvr_data[] = {
 static int cls_fpga_probe(struct pci_dev *dev, const struct pci_device_id *id)
 {	
 	int err;
-	int num_i2c_bus, i = 0, ret;
+	int num_i2c_bus, i = 0;
 	int bmc_present = 0;   /* 0-present 1-absent */
 	unsigned long rstart;
 	void __iomem *base_addr;
@@ -586,8 +586,8 @@ static int cls_fpga_probe(struct pci_dev *dev, const struct pci_device_id *id)
 		goto err_disable_device;
 	}
 
-	ret = pci_enable_msi(dev);
-	if (ret) {
+	err = pci_enable_msi(dev);
+	if (err) {
 		dev_err(&dev->dev,  "failed to allocate MSI entry\n");
 		goto err_unmap;
 	}
@@ -613,7 +613,7 @@ static int cls_fpga_probe(struct pci_dev *dev, const struct pci_device_id *id)
 		dev_err(&dev->dev, "Switchboard base address uninitialized, "
 			"check FPGA\n");
 		err = -ENODEV;
-		goto err_diable_msi;
+		goto err_disable_msi;
 	}
 
 	dev_dbg(&dev->dev, "BAR%d res: 0x%lx-0x%llx\n", MMIO_BAR, 
@@ -627,7 +627,7 @@ static int cls_fpga_probe(struct pci_dev *dev, const struct pci_device_id *id)
 				sizeof(struct switchbrd_priv), GFP_KERNEL);
 	if (!priv){
 		err = -ENOMEM;
-		goto err_diable_msi;
+		goto err_disable_msi;
 	}
 
 	pci_set_drvdata(dev, priv);
@@ -636,6 +636,10 @@ static int cls_fpga_probe(struct pci_dev *dev, const struct pci_device_id *id)
 				&dev->dev, 
 				num_i2c_bus * sizeof(struct platform_device*), 
 				GFP_KERNEL);
+	if (!i2cbuses_pdev) {
+		err = -ENOMEM;
+		goto err_disable_msi;
+	}
 
 	fpga_res[0].start += rstart;
     fpga_res[0].end += rstart;
@@ -659,7 +663,7 @@ static int cls_fpga_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	if (IS_ERR(fpga_pdev)) {
 		dev_err(&dev->dev, "Failed to register fpga node\n");
 		err = PTR_ERR(fpga_pdev);
-		goto err_unmap;
+		goto err_disable_msi;
 	}
 	printk("register fpga node\n");
 	
@@ -755,10 +759,12 @@ static int cls_fpga_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	return 0;
 
 err_unregister_ocore:
-	for(i = 0; i < num_i2c_bus; i++){
-		if(priv->i2cbuses_pdev[i]){
-			platform_device_unregister(priv->i2cbuses_pdev[i]);
-		}
+	/* Only entries before the failed registration can own devices.
+	 * BMC-owned buses were skipped and remain NULL.
+	 */
+	while (i-- > 0) {
+		if (i2cbuses_pdev[i])
+			platform_device_unregister(i2cbuses_pdev[i]);
 	}
 	platform_device_unregister(xcvr_pdev);
 err_unregister_fpga_dev:
@@ -767,7 +773,7 @@ err_unregister_fpga_dev:
 err_free_vector:
 	pci_free_irq_vectors(dev);
 #endif
-err_diable_msi:
+err_disable_msi:
 	pci_disable_msi(dev);
 err_unmap:
 	pci_iounmap(dev, base_addr);
