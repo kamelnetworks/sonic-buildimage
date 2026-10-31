@@ -314,7 +314,7 @@ class Fan(FanBase):
         status, raw_present = self._api_helper.ipmi_raw(
         IPMI_OEM_NETFN, IPMI_FAN_PRESENT_CMD.format(hex(self.index // 2)))
 
-        if status and raw_present == b"00":
+        if status and raw_present == "00":
             presence = True
         self.presence = presence
         self.refresh_time = time.time()
