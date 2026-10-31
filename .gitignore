@@ -7,6 +7,9 @@
 .screen
 rules/config.user
 
+# Local build evidence and caches (not source inputs)
+/build-support/
+
 # Build artifacts
 fsroot/
 fsroot-*/
