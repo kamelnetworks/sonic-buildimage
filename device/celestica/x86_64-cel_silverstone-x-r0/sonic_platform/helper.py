@@ -84,6 +84,7 @@ class APIHelper():
         return result if status else None
 
     def ipmi_raw(self, netfn, cmd):
+        """Return command status and stripped hexadecimal output as text."""
         status = True
         result = ""
         try:
@@ -92,7 +93,7 @@ class APIHelper():
                 cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             raw_data, err = p.communicate()
             if err == b'':
-                result = raw_data.strip()
+                result = raw_data.decode("utf-8").strip()
             else:
                 status = False
         except Exception as E:
