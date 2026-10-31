@@ -32,6 +32,9 @@ spec:
       command: [/bin/bash, -ec]
       args:
         - |
+          # This metadata survives sudo's environment reset. Keep the budget in
+          # sync with the work volume capacity (shared by /work and Docker).
+          printf '%s\n' 'SONIC_WORKSPACE_MODE=ephemeral' 'SONIC_WORKSPACE_BUDGET_GIB=150' > /etc/sonic-build-workspace.conf
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates curl docker.io docker-buildx git make sudo python3-pip python3-venv kmod jq util-linux iptables rsync wget unzip zip build-essential fakeroot dpkg-dev libtool-bin uuid-dev
           python3 -m pip install jinjanator

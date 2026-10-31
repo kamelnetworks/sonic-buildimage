@@ -1,0 +1,18 @@
+name: Kubernetes storage guard
+on:
+  pull_request:
+    paths:
+      - tools/kubernetes/**
+      - .github/workflows/kubernetes-storage-guard.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  storage-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax
+        run: bash -n tools/kubernetes/build.sh tools/kubernetes/check-storage.sh
+      - name: Storage guard regression checks (mocked, no builds)
+        run: python3 -m unittest discover -s tools/kubernetes/tests -v
