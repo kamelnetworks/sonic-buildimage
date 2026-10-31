@@ -1,0 +1,24 @@
+name: Legacy TH module ordering
+
+on:
+  pull_request:
+    paths:
+      - 'platform/broadcom/saibcm-modules-legacy-th/debian/opennsl-modules.init'
+      - 'tests/test_legacy_th_module_order.py'
+      - '.github/workflows/legacy-th-module-order.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  module-order:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Check init syntax and mocked dependency ordering
+        run: |
+          bash -n platform/broadcom/saibcm-modules-legacy-th/debian/opennsl-modules.init
+          python3 tests/test_legacy_th_module_order.py
