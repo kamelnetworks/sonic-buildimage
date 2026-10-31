@@ -180,6 +180,47 @@ class ReleaseWorkflowTest(unittest.TestCase):
         for name in expected:
             self.assertIn(f'release upload build-test-42 assets/{name} --clobber', calls)
 
+    def stage_nonrelease(self, targets='', names=None):
+        scripts = self.root / 'scripts'
+        scripts.mkdir()
+        (scripts / 'release-assets.sh').write_text(RELEASE_HELPER.read_text())
+        for name in names or []:
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'binary output')
+        self.env.update(MATRIX_PLATFORM='vs', TARGETS_INPUT=targets)
+        return self.run_script(script('build', 'Stage non-release binaries'))
+
+    def test_nonrelease_preserves_component_outputs(self):
+        names = ['target/debs/trixie/module.deb', 'target/python-wheels/trixie/api.whl']
+        result = self.stage_nonrelease(' '.join(names), names)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for name in names:
+            output = self.root / 'artifact-root' / ('vs__' + Path(name).name)
+            self.assertEqual(output.read_bytes(), b'binary output')
+
+    def test_nonrelease_preserves_default_installer(self):
+        result = self.stage_nonrelease(names=['target/sonic-vs.bin'])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.root / 'artifact-root/vs__sonic-vs.bin').read_bytes(), b'binary output')
+
+    def test_nonrelease_missing_output_fails(self):
+        self.assertNotEqual(self.stage_nonrelease('target/missing.deb').returncode, 0)
+
+    def test_nonrelease_empty_target_list_fails(self):
+        self.assertNotEqual(self.stage_nonrelease('  ').returncode, 0)
+
+    def test_nonrelease_duplicate_basenames_fail(self):
+        names = ['target/debs/trixie/module.deb', 'target/debs/bookworm/module.deb']
+        self.assertNotEqual(self.stage_nonrelease(' '.join(names), names).returncode, 0)
+
+    def test_nonrelease_staging_does_not_publish(self):
+        step = next(s for s in WORKFLOW['jobs']['build']['steps']
+                    if s.get('name') == 'Stage non-release binaries')
+        self.assertIn('!inputs.create_release', step['if'])
+        self.assertIn('success()', step['if'])
+        self.assertNotIn('gh release', step['run'])
+
     def test_publish_preserves_branch_version_title(self):
         self.env.update(RELEASE_TAG='build-202611-master-42', RELEASE_TITLE='202611-master-v42')
         result = self.run_script('gh() { printf "%s\\n" "$@" >> gh-args; }\n' + script('release', 'Publish release'))
