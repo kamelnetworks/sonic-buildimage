@@ -44,6 +44,26 @@ class StorageGuardTest(unittest.TestCase):
                 capture_output=True, text=True,
             )
 
+    def test_whitespace_targets_do_not_invoke_default_build(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for command, body in {
+                "id": "echo 1000",
+                "git": 'printf "%s\\n" "$TEST_REPOSITORY"',
+                "make": "exit 99",
+            }.items():
+                executable = root / command
+                executable.write_text(f"#!/bin/bash\n{body}\n")
+                executable.chmod(0o755)
+            result = subprocess.run(
+                ["bash", str(GUARD.with_name("build.sh"))],
+                env={**os.environ, "PATH": f"{root}:{os.environ['PATH']}",
+                     "TEST_REPOSITORY": str(GUARD.parents[2]), "TARGETS": "  \t "},
+                capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("TARGETS must contain at least one make target", result.stderr)
+
     def test_persistent_workspace_with_capacity(self):
         self.assertEqual(self.check_guard().returncode, 0)
 

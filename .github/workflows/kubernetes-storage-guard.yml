@@ -11,7 +11,7 @@ jobs:
   storage-guard:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Shell syntax
         run: bash -n tools/kubernetes/build.sh tools/kubernetes/check-storage.sh
       - name: Storage guard regression checks (mocked, no builds)

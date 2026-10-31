@@ -12,6 +12,10 @@ platform=${PLATFORM:-marvell-teralynx}
 if [[ -n ${TARGETS:-} ]]; then
     # TARGETS is a whitespace-separated list of make targets, never shell code.
     read -r -a targets <<< "$TARGETS"
+    if (( ${#targets[@]} == 0 )); then
+        echo 'TARGETS must contain at least one make target.' >&2
+        exit 1
+    fi
 else
     targets=("target/sonic-${platform}.bin")
 fi
