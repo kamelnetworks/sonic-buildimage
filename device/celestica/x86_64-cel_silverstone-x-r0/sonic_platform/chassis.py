@@ -41,7 +41,7 @@ class Chassis(ChassisBase):
         self.port_start = 0
         self.port_end = NUM_SFP - 1
         self.fan_start = 0
-        self.fan_end = NUM_FAN_TRAY - 1
+        self.fan_end = NUM_FAN_TRAY * NUM_FAN - 1
         self.sfp_module_initialized = False
         self.fan_module_initialized = False
         self.__initialize_eeprom()
@@ -293,11 +293,10 @@ class Chassis(ChassisBase):
             self.__initialize_fan()
 
         content = 0
-        for fan in self._fan_list:
+        # Bit i represents the zero-based chassis fan index, not a tray.
+        for index, fan in enumerate(self._fan_list):
             if fan.get_presence():
-                content = content << 1 | 1
-            else:
-                content = content << 1
+                content |= 1 << index
 
         return content
 
@@ -335,6 +334,8 @@ class Chassis(ChassisBase):
                   Ex. {'fan':{'0':'0', '2':'1'}, 'sfp':{'11':'0'}}
                       indicates that fan 0 has been removed, fan 2
                       has been inserted and sfp 11 has been removed.
+                  Fan IDs are zero-based indices into get_all_fans():
+                  front/rear fans of tray 0 are 0/1, through tray 6 at 12/13.
                   Specifically for SFP event, besides SFP plug in and plug out,
                   there are some other error event could be raised from SFP, when
                   these error happened, SFP eeprom will not be avalaible, XCVRD shall
@@ -393,19 +394,10 @@ class Chassis(ChassisBase):
             value = self.get_fan_status()
             if value != self.fan_init_status:
                 changed_fans = self.fan_init_status ^ value
-                while fan >= self.fan_start and fan <= self.fan_end:
-
-                    # Mask off the bit corresponding to our port
-                    mask = (1 << fan)
-
+                for fan in range(self.fan_start, self.fan_end + 1):
+                    mask = 1 << fan
                     if changed_fans & mask:
-                        # ModPrsL is active low
-                        if value & mask == 0:
-                            fan_dict[port] = '0'
-                        else:
-                            fan_dict[port] = '1'
-
-                    fan += 1
+                        fan_dict[fan] = '1' if value & mask else '0'
 
                 # Update reg value
                 self.fan_init_status = value

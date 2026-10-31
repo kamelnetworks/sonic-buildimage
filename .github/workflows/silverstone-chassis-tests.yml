@@ -1,0 +1,21 @@
+name: Silverstone-X chassis events
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/silverstone-chassis-tests.yml'
+      - 'device/celestica/x86_64-cel_silverstone-x-r0/sonic_platform/chassis.py'
+      - 'device/celestica/x86_64-cel_silverstone-x-r0/tests/test_chassis_events.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  chassis-events:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check fan and SFP change events without hardware
+        run: python3 -m unittest discover -s device/celestica/x86_64-cel_silverstone-x-r0/tests -p test_chassis_events.py -v
