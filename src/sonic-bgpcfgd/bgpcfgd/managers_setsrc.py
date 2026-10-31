@@ -1,6 +1,6 @@
 import jinja2
 
-from .log import log_err, log_warn, log_info
+from .log import log_err, log_info
 from .manager import Manager
 from .template import TemplateFabric
 
@@ -24,6 +24,8 @@ class ZebraSetSrc(Manager):
         self.zebra_set_src_template = tf.from_file("zebra/zebra.set_src.conf.j2")
         self.lo_ipv4 = None
         self.lo_ipv6 = None
+        self.lo_ipv4_key = None
+        self.lo_ipv6_key = None
 
     def set_handler(self, key, data):
         """ Implementation of 'SET' command for this class """
@@ -36,32 +38,41 @@ class ZebraSetSrc(Manager):
                 log_err("Wrong Loopback0 ip prefix: '%s'" % ip_addr_w_mask)
                 return True
             ip_addr = ip_addr_w_mask[:slash_pos]
+            if TemplateFabric.is_ipv4(ip_addr):
+                attr, rm_name, ip_proto = "lo_ipv4", "RM_SET_SRC", ""
+            elif TemplateFabric.is_ipv6(ip_addr):
+                attr, rm_name, ip_proto = "lo_ipv6", "RM_SET_SRC6", "v6"
+            else:
+                log_err("Got ambiguous ip address '%s'" % ip_addr)
+                return True
+
+            if getattr(self, attr) == ip_addr:
+                # A prefix-length change can move the same source to a new key.
+                setattr(self, attr + "_key", key)
+                return True
             try:
-                if TemplateFabric.is_ipv4(ip_addr):
-                    if self.lo_ipv4 is None:
-                        self.lo_ipv4 = ip_addr
-                        txt = self.zebra_set_src_template.render(rm_name="RM_SET_SRC", lo_ip=ip_addr, ip_proto="")
-                    else:
-                        log_warn("Update command is not supported for set src templates. current ip='%s'. new ip='%s'" % (self.lo_ipv4, ip_addr))
-                        return True
-                elif TemplateFabric.is_ipv6(ip_addr):
-                    if self.lo_ipv6 is None:
-                        self.lo_ipv6 = ip_addr
-                        txt = self.zebra_set_src_template.render(rm_name="RM_SET_SRC6", lo_ip=ip_addr, ip_proto="v6")
-                    else:
-                        log_warn("Update command is not supported for set src templates. current ip='%s'. new ip='%s'" % (self.lo_ipv6, ip_addr))
-                        return True
-                else:
-                    log_err("Got ambiguous ip address '%s'" % ip_addr)
-                    return True
+                txt = self.zebra_set_src_template.render(
+                    rm_name=rm_name, lo_ip=ip_addr, ip_proto=ip_proto)
             except jinja2.TemplateError as e:
                 log_err("Error while rendering 'set src' template: %s" % str(e))
                 return True
             self.cfg_mgr.push(txt)
+            setattr(self, attr, ip_addr)
+            setattr(self, attr + "_key", key)
             log_info("The 'set src' configuration with Loopback0 ip '%s' has been scheduled to be added" % ip_addr)
         return True
 
     def del_handler(self, key):
         """ Implementation of 'DEL' command for this class """
         self.directory.remove(self.db_name, self.table_name, key)
-        log_warn("Delete key '%s' is not supported for 'zebra set src' templates" % str(key))
+        for attr, protocol, rm_name in (
+                ("lo_ipv4", "ip", "RM_SET_SRC"),
+                ("lo_ipv6", "ipv6", "RM_SET_SRC6")):
+            if key != getattr(self, attr + "_key"):
+                continue
+            # Detach first so BGP routes no longer use the removed source.
+            self.cfg_mgr.push("no %s protocol bgp route-map %s\nno route-map %s" %
+                              (protocol, rm_name, rm_name))
+            setattr(self, attr, None)
+            setattr(self, attr + "_key", None)
+            log_info("The 'set src' configuration for '%s' has been scheduled to be removed" % key)

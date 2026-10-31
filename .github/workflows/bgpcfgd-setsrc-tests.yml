@@ -1,0 +1,32 @@
+name: bgpcfgd Loopback source updates
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/bgpcfgd-setsrc-tests.yml'
+      - 'src/sonic-bgpcfgd/bgpcfgd/managers_setsrc.py'
+      - 'src/sonic-bgpcfgd/bgpcfgd/manager.py'
+      - 'src/sonic-bgpcfgd/bgpcfgd/directory.py'
+      - 'src/sonic-bgpcfgd/bgpcfgd/template.py'
+      - 'src/sonic-bgpcfgd/tests/test_setsrc.py'
+      - 'src/sonic-bgpcfgd/tests/swsscommon_test.py'
+      - 'dockers/docker-fpm-frr/frr/zebra/zebra.set_src.conf.j2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  setsrc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install Python test dependencies
+        run: python -m pip install pytest jinja2 netaddr==0.8.0
+      - name: Check source route-map updates with real templates
+        working-directory: src/sonic-bgpcfgd
+        run: python -m pytest -o addopts= tests/test_setsrc.py -v
