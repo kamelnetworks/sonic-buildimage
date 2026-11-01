@@ -577,10 +577,52 @@ jobs:
           done < uploaded-assets.txt
           gh release view "$RELEASE_TAG" --json assets --jq '[.assets[].name] | length'
 
+      - name: Stage non-release binaries
+        if: ${{ !inputs.create_release && success() }}
+        env:
+          TARGETS_INPUT: ${{ inputs.targets }}
+        run: |
+          source scripts/release-assets.sh
+          source_root=$PWD
+          mkdir -p artifact-root
+          cd artifact-root
+          : > uploaded-assets.txt
+          if [[ -z "$TARGETS_INPUT" ]]; then
+            targets=("target/sonic-$MATRIX_PLATFORM.bin")
+          else
+            read -r -a targets <<< "$TARGETS_INPUT"
+          fi
+          if (( ${#targets[@]} == 0 )); then
+            echo '::error::no binary targets to preserve'
+            exit 1
+          fi
+          for target in "${targets[@]}"; do
+            if [[ ! -f "$source_root/$target" ]]; then
+              echo "::error::requested build output is missing or not a file: $target"
+              exit 1
+            fi
+            name="${MATRIX_PLATFORM}__$(basename "$target")"
+            if [[ -e assets/$name || -e assets/$name.parts ]]; then
+              echo "::error::duplicate artifact filename: $name"
+              exit 1
+            fi
+            prepare_release_asset "$source_root/$target" "$name"
+          done
+          mv assets/* .
+          rmdir assets
+          mv uploaded-assets.txt "${MATRIX_PLATFORM}__binary-files.txt"
+          cat > "${MATRIX_PLATFORM}__binary-README.txt" <<'README'
+          This non-release build preserves the requested binaries alongside logs.
+          Files at least 2 GiB are split. Reassemble each .parts list in order:
+            while IFS= read -r part; do cat "$part"; done < NAME.parts > NAME
+            sha256sum -c NAME.sha256
+          Remove the platform__ prefix from an unsplit/reassembled filename if needed.
+          README
+
       - name: Collect build artifacts
         if: ${{ !cancelled() }}
-        # Small artifact only (manifests, expected-asset list, logs,
-        # debug-installer): the release assets went directly to the draft.
+        # Release builds keep manifests/logs here; binaries go to the draft.
+        # Non-release builds also keep the requested binaries staged above.
         # Platform-prefixed flat filenames (<p>__<name>) keep platform
         # identity independent of the download layout (download-artifact
         # flattens single-match downloads).

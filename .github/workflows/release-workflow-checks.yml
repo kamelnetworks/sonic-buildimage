@@ -1,0 +1,19 @@
+name: Release workflow regression checks
+on:
+  pull_request:
+    paths:
+      - .github/workflows/sonic-build.yml
+      - .github/workflows/release-workflow-checks.yml
+      - scripts/release-assets.sh
+      - tests/test_release_workflow.py
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  workflow-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: python3 -m pip install PyYAML
+      - name: Workflow scripts with synthetic outputs (no builds)
+        run: python3 -m unittest discover -s tests -p test_release_workflow.py -v
