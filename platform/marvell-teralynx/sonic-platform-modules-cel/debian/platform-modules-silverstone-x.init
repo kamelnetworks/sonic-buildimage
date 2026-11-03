@@ -25,6 +25,11 @@ start)
 	modprobe fpga_xcvr
 	modprobe lpc_basecpld
 	modprobe mc24lc64t
+	# optoe comes from the SONiC kernel (CONFIG_EEPROM_OPTOE=m): it binds
+	# optoe1 (SFF-8436/8636 QSFP), optoe2 (SFF-8472 SFP) and optoe3
+	# (CMIS QSFP-DD/OSFP, with page and bank select). This package must
+	# not ship its own optoe.ko: a copy under extra/ can shadow the
+	# kernel's module and lose optoe3 (issue #27).
 	modprobe optoe
        	
 	# Instantiate TLV EEPROM device on I801/ISMT bus 
