@@ -1,12 +1,5 @@
 # AGENTS.md — kamelnetworks/sonic-buildimage
 
-Kamel Networks' fork of SONiC's image builder. `202611-master` is upstream
-sonic-net master pinned at `8ef49ca84` (PR #24) plus our carried patches. The
-images run in SONIX production on three platforms. Write claim-limited prose:
-say what was observed, on which image (sha256) and which hardware, and keep
-unknowns explicit. "Builds" is not the same as "boots", and neither is the
-same as "passes traffic".
-
 ## Release
 
 The current release is **202611-pre**. Its pinned tracker is #93 and its
@@ -17,10 +10,11 @@ release effort on other platforms.
 
 - `gh issue list -m 202611-pre -l release-blocker` (also `release-should`,
   `needs-hw-validation`) lists the open work.
-- Only @bluecmd changes the tracker's scope. Propose changes in a comment on
-  the tracker.
-- Issues titled `Decision:` are @bluecmd's call. Summarise the options if
-  asked, but don't decide, and don't merge code that presumes the answer.
+- Only the release owners (@bluecmd, @dal00, @fyx, @SoundGoof) change the
+  tracker's scope. Propose changes in a comment on the tracker.
+- Issues titled `Decision:` are decided by the release owners. Summarise the
+  options if asked, but don't decide, and don't merge code that presumes the
+  answer.
 
 ## Layout
 
@@ -104,7 +98,6 @@ doesn't replace them.
 | ixp-lab-sw2, sw3 | HPE 3132Q / Seastone 2 | Trident 3, Celestica non-PDDF API, EVPN |
 | ixp-lab-sw4 | Dell S5232F-ON | Trident 3, Dell platform API, EVPN |
 | ixp-lab-eos1 | Arista 7050QX (EOS) | Known-good hub and reference VTEP, test VMs |
-| smoketest | HPE 3132Q | **Not ours.** sai-rev-eng's Nova baseline: don't reimage it or start stock services on it. |
 
 - **Reserve** before changing a device, and put the issue in the message so
   `status` and `history` link back to the work:
