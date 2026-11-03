@@ -157,29 +157,27 @@ logdir /var/log/chrony
 # Stop bad estimates upsetting machine clock.
 maxupdateskew 100.0
 
-# This directive enables kernel synchronisation (every 11 minutes) of the
-# real-time clock. Note that it can’t be used along with the 'rtcfile' directive.
-#rtcsync
+# Let the kernel keep the real-time clock in sync: every 11 minutes while the
+# system clock is synchronised, it copies the system time to the RTC. It also
+# makes chronyd clear the kernel's STA_UNSYNC flag once synchronised, which is
+# what monitoring reads (node_exporter's node_timex_sync_status, timedatectl).
+# It can't be used along with 'rtcfile' (chronyd refuses to start with both),
+# so chrony's own RTC tracking (rtcfile/hwclockfile/rtconutc/rtcautotrim) is
+# not used.
+rtcsync
 
-# Instead of having the kernel manage the real-time clock, have chrony do this
-# instead. The reason for this is that if the system time and the real-time clock
-# are signficantly different from the actual time, then the system time must be
-# slewed, while the real-time clock can be stepped to the actual time. That way,
-# when the device next reboots (whether it be cold, warm, or fast), it will come
-# up with the actual time from the real-time clock.
-rtcfile /var/lib/chrony/rtc
-hwclockfile /etc/adjtime
-rtconutc
-rtcautotrim 15
-
-# On switch BMCs, step offsets larger than 15 seconds during the first three
-# clock updates.
+# Step the system clock instead of slewing it if the adjustment is larger than
+# the threshold, but only in the first three clock updates after chronyd
+# starts (at boot, or when hostcfgd restarts chrony after an NTP config
+# change). Every later offset is slewed. Without this, a clock that boots
+# hours off (bad RTC) is slewed at 83 ms/s and takes days to converge, with
+# the kernel reporting it unsynchronised the whole time (#122).
 {% if switch_bmc == 1 -%}
 makestep 15 3
 {% else -%}
-# Disabled because we don't want chrony to do any clock steps; it should only slew
-#makestep 15 3
+makestep 1 3
 {% endif %}
+
 # Get TAI-UTC offset and leap seconds from the system tz database.
 # This directive must be commented out when using time sources serving
 # leap-smeared time.
