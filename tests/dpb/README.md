@@ -17,7 +17,7 @@ does, derives the PORT table of every HWSKU that has a `hwsku.json` and
 compares it with `port_config.ini`, maps the HWSKUs without `hwsku.json` onto
 breakout modes, and checks each `config.bcm` for `port_flex_enable=1`, a
 `portmap` per port macro and free logical port ids for the children.
-`.github/workflows/breakout-modes.yml` runs both on pull requests that touch
+Both are cheap enough for a GitHub Actions job on pull requests that touch
 these platforms.
 
 To write the `hwsku.json` a custom HWSKU (for example a SONIX one) needs for
