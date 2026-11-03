@@ -1,0 +1,10 @@
+# PyPI packages the tests run by scripts/run-fork-unit-tests.sh import.
+# Python 3.13, as in the sonic-slave-trixie image.
+jinja2==3.1.6
+natsort==8.4.0
+pexpect==4.9.0
+psutil==7.2.2
+pyfakefs==6.3.1
+pytest==9.2.0
+pyyaml==6.0.3
+tabulate==0.10.0

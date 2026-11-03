@@ -55,3 +55,39 @@ sha256sum -c sonic-vs.bin.sha256
 
 The reconstructed installer is byte-for-byte identical to the build output.
 Files below the limit retain their existing asset names.
+
+## Fork unit tests
+
+`fork-unit-tests.yml` runs on every pull request and on pushes to
+`202611-master`. It calls `scripts/run-fork-unit-tests.sh`, which finds the
+tests by where they live, so a new test needs no workflow change:
+
+| Location | Files | Run with |
+| --- | --- | --- |
+| `device/<vendor>/<platform>/tests/` | `test_*.py` | `python -m pytest` |
+| `platform/**/tests/` | `test_*.py` | `python -m pytest` |
+| `tests/` | `test_*.py` | `python -m pytest` |
+| `files/**/tests/` | `test_*.sh` | `bash` |
+
+- Only files directly in a `tests/` directory count, and each file runs in its
+  own process. A file fails the job if it fails or collects no tests.
+- The tests run on Python 3.13 (as in `sonic-slave-trixie`) without a build and
+  without hardware. Mock sysfs, IPMI and STATE_DB in the test.
+- `PYTHONPATH` holds the code under test (the directory containing `tests/`,
+  or the first non-package directory above it), `src/sonic-py-common` and the
+  pinned `src/sonic-platform-common` and `src/sonic-platform-daemons`
+  (`sonic-xcvrd`). The script checks them out shallow at the pinned commits. If
+  a test needs another submodule, add it to `SUBMODULES`/`PYPATH` in the
+  script. PyPI packages go in `scripts/fork-unit-tests-requirements.txt`.
+- A test that needs build output (swsscommon, libyang, vendor SDKs) must not be
+  named `test_*.py`. For example, `tests/dpb/config_dpb_platforms_test.py` runs
+  inside a sonic-utilities tree, as its README describes.
+- Upstream suites that need such a build are listed in `EXCLUDE` in the
+  script, and each entry says why.
+
+Run it locally the same way, in a `python:3.13` container:
+
+```sh
+pip install -r scripts/fork-unit-tests-requirements.txt
+scripts/run-fork-unit-tests.sh          # --list shows what would run
+```
