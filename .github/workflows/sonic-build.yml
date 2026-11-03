@@ -523,15 +523,24 @@ jobs:
 
       - name: Check dirty version
         # Only meaningful after a build; skip when an earlier step failed.
+        # Must stay before 'Upload release assets to the draft': a release
+        # leg with a -dirty version fails here, so its upload (gated on
+        # success()) never runs and the release job never publishes (#115).
         if: ${{ success() }}
+        env:
+          CREATE_RELEASE: ${{ inputs.create_release }}
         run: |
           source functions.sh
           sonic_version=$(sonic_get_version)
           echo "version: $sonic_version"
           if [[ "$sonic_version" == *dirty* ]]; then
-            # Warning only for manual branch builds, like the Azure flow.
             git status --untracked-files=no -s --ignore-submodules || true
             git diff --ignore-submodules --stat || true
+            if [[ "$CREATE_RELEASE" == "true" ]]; then
+              echo "::error::Release build version is dirty: $sonic_version; refusing to upload release assets."
+              exit 1
+            fi
+            # Warning only for non-release builds, like the Azure flow.
             echo "::warning::Build version is dirty: $sonic_version"
           fi
 

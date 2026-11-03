@@ -4,6 +4,7 @@ on:
     paths:
       - .github/workflows/sonic-build.yml
       - .github/workflows/release-workflow-checks.yml
+      - functions.sh
       - scripts/release-assets.sh
       - tests/test_release_workflow.py
   workflow_dispatch:
