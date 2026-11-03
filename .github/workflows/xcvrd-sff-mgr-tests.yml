@@ -1,0 +1,35 @@
+name: xcvrd sff_mgr platform checks
+
+on:
+  pull_request:
+    paths:
+      - 'device/celestica/x86_64-cel_silverstone-x-r0/pmon_daemon_control.json'
+      - 'device/celestica/x86_64-cel_silverstone-x-r0/sonic_platform/sfp.py'
+      - 'device/dell/x86_64-dellemc_s5232f_c3538-r0/pmon_daemon_control.json'
+      - 'device/celestica/x86_64-cel_seastone_2-r0/pmon_daemon_control.json'
+      - 'platform/broadcom/sonic-platform-modules-dell/s5232f/sonic_platform/sfp.py'
+      - 'platform/broadcom/sonic-platform-modules-cel/seastone2/sonic_platform/sfp.py'
+      - 'dockers/docker-platform-monitor/docker-pmon.supervisord.conf.j2'
+      - 'src/sonic-platform-common'
+      - 'src/sonic-platform-daemons'
+      - 'tests/test_xcvrd_sff_mgr_lpmode.py'
+      - '.github/workflows/xcvrd-sff-mgr-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sff-mgr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Check out the pinned sonic-platform-common and sonic-platform-daemons
+        run: git submodule update --init --depth 1 src/sonic-platform-common src/sonic-platform-daemons
+      - name: Install the Python dependencies the platform code imports
+        run: python3 -m pip install --user natsort pyyaml jinja2
+      - name: Run the pinned xcvrd sff_mgr against the platform Sfp classes with mocked sysfs and EEPROM
+        run: python3 tests/test_xcvrd_sff_mgr_lpmode.py -v
