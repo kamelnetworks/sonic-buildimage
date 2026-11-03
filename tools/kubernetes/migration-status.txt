@@ -40,7 +40,8 @@ Removed obsolete fork changes:
 
 Adaptations after replay:
   Remove duplicate advertise-svi-ip registration; preserve EVPN flooding template.
-  Accton AS5712 PDDF package skips removed kernel-driver and utils directories.
+  Accton AS5712 PDDF package skipped removed kernel-driver and utils directories
+    (dropped again by #92: AS5712-54X is back to the upstream tree).
   Silverstone platform/I2C callback signatures, class_create and mux APIs ported
     to Linux 6.12. Debian packaging stops at the first error and declares Python
     wheel build dependencies. Both Celestica packages depend on current kernel ABI.
