@@ -1690,6 +1690,53 @@ assert config == original, 'Rendering mutated the ConfigDB input'
         self.run_script(argument, output_file=self.output_file)
         assert utils.cmp(expected, self.output_file), self.run_diff(expected, self.output_file)
 
+    @staticmethod
+    def _chrony_directives(path):
+        # Effective (uncommented, non-empty) chrony.conf directives, as
+        # "name args" strings with whitespace normalised.
+        with open(path) as f:
+            lines = (line.strip() for line in f)
+            return [' '.join(line.split()) for line in lines
+                    if line and not line.startswith('#')]
+
+    def test_ntp_conf_switch_steps_at_boot_and_rtcsync(self):
+        # kamelnetworks/sonic-buildimage#122: on switches (switch_bmc=0, and
+        # the default when switch_bmc is not passed) chronyd must
+        #  - be allowed to step the clock during its first clock updates
+        #    (a clock that boots hours off would otherwise be slewed at
+        #    83 ms/s for days), and
+        #  - use rtcsync, so the kernel clears STA_UNSYNC once synchronised
+        #    (node_exporter's node_timex_sync_status). chronyd refuses to
+        #    start with both rtcsync and rtcfile, and hwclockfile/rtconutc/
+        #    rtcautotrim only matter with rtcfile.
+        conf_template = os.path.join(self.test_dir, "chrony.conf.j2")
+        config_db_ntp_json = os.path.join(self.test_dir, "data", "ntp", "ntp_interfaces.json")
+
+        for extra_args in (['-a', '{"switch_bmc": 0}'], []):
+            argument = ['-j', config_db_ntp_json] + extra_args + ['-t', conf_template]
+            self.run_script(argument, output_file=self.output_file)
+            directives = self._chrony_directives(self.output_file)
+            names = [d.split()[0] for d in directives]
+
+            assert 'makestep 1 3' in directives, directives
+            assert 'rtcsync' in directives, directives
+            for rtcfile_only in ('rtcfile', 'hwclockfile', 'rtconutc', 'rtcautotrim'):
+                assert rtcfile_only not in names, directives
+
+    def test_ntp_conf_switch_bmc_steps_at_boot_and_rtcsync(self):
+        # Same as above for switch BMCs, which keep upstream's 15 s threshold.
+        conf_template = os.path.join(self.test_dir, "chrony.conf.j2")
+        config_db_ntp_json = os.path.join(self.test_dir, "data", "ntp", "ntp_interfaces.json")
+
+        argument = ['-j', config_db_ntp_json, '-a', '{"switch_bmc": 1}', '-t', conf_template]
+        self.run_script(argument, output_file=self.output_file)
+        directives = self._chrony_directives(self.output_file)
+        names = [d.split()[0] for d in directives]
+
+        assert 'makestep 15 3' in directives, directives
+        assert 'rtcsync' in directives, directives
+        assert 'rtcfile' not in names, directives
+
     def test_ntp_smartswitch_conf(self):
         conf_template = os.path.join(self.test_dir, "chrony.conf.j2")
         config_db_ntp_json = os.path.join(self.test_dir, "data", "ntp", "ntp_smartswitch_interfaces.json")
