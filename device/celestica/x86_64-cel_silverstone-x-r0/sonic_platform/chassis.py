@@ -56,7 +56,12 @@ class Chassis(ChassisBase):
             self.__initialize_psu()
             self.__initialize_thermals()
             self.__initialize_components()
-        self.modprs_register = self.get_transceiver_status()
+        # Start from "nothing present": the first get_change_event() then
+        # reports every populated port as inserted, which binds its media
+        # (Sfp.initialize_media) and makes xcvrd read it. Seeding from the
+        # hardware here would build all 34 Sfps in every process that creates
+        # a Chassis, including read-only CLI commands (#101).
+        self.modprs_register = 0
         self.fan_init_status = self.get_fan_status()
 
     def __initialize_sfp(self):
@@ -384,6 +389,10 @@ class Chassis(ChassisBase):
                             port_dict[port] = '0'
                         else:
                             port_dict[port] = '1'
+                            # Only the owning daemon polls events, so this
+                            # is the one place that may re-bind the optoe
+                            # driver to the inserted media.
+                            self.get_all_sfps()[port].initialize_media()
 
                     port += 1
 
