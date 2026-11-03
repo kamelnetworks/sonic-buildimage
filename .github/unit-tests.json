@@ -28,5 +28,16 @@
     "workdir": "src/sonic-bgpcfgd",
     "pytest_path": "tests",
     "editable_install": "src/sonic-bgpcfgd"
+  },
+  "sonic-buildimage": {
+    "image": "target/docker-config-engine-trixie.gz",
+    "pip": [
+      "pytest",
+      "jinja2",
+      "PyYAML",
+      "pexpect"
+    ],
+    "workdir": ".",
+    "pytest_path": "tests"
   }
 }

@@ -15,7 +15,7 @@ on:
         options: [unit, dvs, kvm]
       packages:
         description: 'unit suite: comma-separated package keys from .github/unit-tests.json (empty = all)'
-        default: 'sonic-config-engine,sonic-bgpcfgd'
+        default: 'sonic-buildimage,sonic-config-engine,sonic-bgpcfgd'
       slave_cache:
         description: 'Reuse the GHCR-cached slave image (fall back to building it)'
         type: boolean
@@ -201,8 +201,10 @@ jobs:
               apt = 'apt-get update -qq && apt-get install -y -qq ' + ' '.join(c.get('apt', [])) + ' && ' if c.get('apt') else ''
               whls = ' '.join(f"/sonic/target/python-wheels/trixie/{w}-*.whl" for w in c.get('wheels', []))
               whlcmd = f"pip3 install --no-deps {whls} && " if whls else ''
-              cmd = (apt + whlcmd +
-                     f"pip3 install --no-deps -e /sonic/{c['editable_install']} && "
+              # Package-less entries (e.g. the repository's own tests/) have no
+              # editable install.
+              edit = f"pip3 install --no-deps -e /sonic/{c['editable_install']} && " if c.get('editable_install') else ''
+              cmd = (apt + whlcmd + edit +
                      f"pip3 install {' '.join(c['pip'])} && "
                      f"python3 -m pytest {c['pytest_path']} -q --junitxml=/sonic/test-results/{pkg}.xml")
               # Some images (docker-fpm-frr) have an ENTRYPOINT that ignores
