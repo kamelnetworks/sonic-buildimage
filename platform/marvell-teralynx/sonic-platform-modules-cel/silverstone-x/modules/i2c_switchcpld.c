@@ -43,7 +43,8 @@
 
 #define SWCPLD1_I2C_ADDR 0x30
 #define SWCPLD2_I2C_ADDR 0x31
-#define SWCPLD_NUM 2
+/* Shared by both CPLDs; owned by module init/exit. */
+static struct class *sff_class;
 
 
 /* Private data for switchboard CPLD */
@@ -450,7 +451,7 @@ static struct device * cloverstone_dp_sff_init(struct device *dev, int portid) {
     new_data = kzalloc(sizeof(*new_data), GFP_KERNEL);
     if (!new_data) {
         printk(KERN_ALERT "Cannot alloc sff device data @port%d", portid);
-        return NULL;
+        return ERR_PTR(-ENOMEM);
     }
         
     /* The QSFP port ID start from 1 */
@@ -472,7 +473,7 @@ static struct device * cloverstone_dp_sff_init(struct device *dev, int portid) {
     if (IS_ERR(new_device)) {
         printk(KERN_ALERT "Cannot create sff device @port%d", (data->client->addr == SWCPLD1_I2C_ADDR) ? (portid + 1) : (portid + 1 + QSFP_PORT_NUM));
         kfree(new_data);
-        return NULL;
+        return new_device;
     }
     
     printk(KERN_INFO "Create sff device @port%d", (data->client->addr == SWCPLD1_I2C_ADDR) ? (portid + 1) : (portid + 1 + QSFP_PORT_NUM));
@@ -482,10 +483,9 @@ static struct device * cloverstone_dp_sff_init(struct device *dev, int portid) {
 
 static int switchboard_probe(struct i2c_client *client)
 {
-    int err, ret = 0;
+    int err;
     struct device *dev;
     struct switchboard_data *data;
-    static struct class* class;
     u8 portid = 0;
     struct sff_device_data *new_data;
     
@@ -508,22 +508,12 @@ static int switchboard_probe(struct i2c_client *client)
     data->client = client;
 
     /*create CPLD sysfs*/
-    ret = sysfs_create_group(&dev->kobj, &switchboard_attrs_grp);
-    if (ret != 0) {
+    err = sysfs_create_group(&dev->kobj, &switchboard_attrs_grp);
+    if (err) {
         goto fail_alloc_switchboard_data;
     }
 
-    if (class == NULL){
-        class = class_create("SFF");
-        data->class = class;
-        if (IS_ERR(data->class)) {
-            printk(KERN_ALERT "Failed to register device class\n");
-            err = PTR_ERR(data->class);
-            goto fail_sysfs_create_group;
-        }
-    }else{
-        data->class = class;
-    }
+    data->class = sff_class;
     /* create 32 QSFP sysfs */
     for (portid = 0; portid < QSFP_PORT_NUM; portid++) {
         data->sff_devices[portid] = cloverstone_dp_sff_init(dev, portid);
@@ -535,19 +525,14 @@ static int switchboard_probe(struct i2c_client *client)
     }
     return 0;
     
-fail_register_sff_device:    
-    for (portid = 0; portid < QSFP_PORT_NUM; portid++) {
-        if (data->sff_devices[portid] != NULL){
-            new_data = dev_get_drvdata(data->sff_devices[portid]);
-            device_unregister(data->sff_devices[portid]);
-            put_device(data->sff_devices[portid]);
-            kfree(new_data);
-        }
+fail_register_sff_device:
+    /* The failed entry is an ERR_PTR; unwind only registered devices. */
+    while (portid > 0) {
+        portid--;
+        new_data = dev_get_drvdata(data->sff_devices[portid]);
+        device_unregister(data->sff_devices[portid]);
+        kfree(new_data);
     }
-    device_destroy(data->class, MKDEV(0, 0));
-    class_unregister(data->class);
-    class_destroy(data->class);
-fail_sysfs_create_group:
     sysfs_remove_group(&dev->kobj, &switchboard_attrs_grp);
 fail_alloc_switchboard_data:
     return err;
@@ -559,23 +544,15 @@ static void switchboard_remove(struct i2c_client *client)
     struct sff_device_data *new_data;
     struct device *dev = &client->dev;
     struct switchboard_data *data = dev_get_drvdata(dev);
-    static u8 index = 1;
     
     for (portid = 0; portid < QSFP_PORT_NUM; portid++) {
         if (data->sff_devices[portid] != NULL){
             new_data = dev_get_drvdata(data->sff_devices[portid]);
             device_unregister(data->sff_devices[portid]);
-            put_device(data->sff_devices[portid]);
             kfree(new_data);
         }
     }
-    if (index == SWCPLD_NUM){
-        device_destroy(data->class, MKDEV(0, 0));
-        class_unregister(data->class);
-        class_destroy(data->class);
-    }
     sysfs_remove_group(&dev->kobj, &switchboard_attrs_grp);
-    index++;
 }
 
 static const struct i2c_device_id switchboard_ids[] = {
@@ -595,7 +572,28 @@ struct i2c_driver switchboard_driver = {
     .id_table = switchboard_ids,
 };
 
-module_i2c_driver(switchboard_driver);
+static int __init switchboard_init(void)
+{
+    int err;
+
+    sff_class = class_create("SFF");
+    if (IS_ERR(sff_class))
+        return PTR_ERR(sff_class);
+
+    err = i2c_add_driver(&switchboard_driver);
+    if (err)
+        class_destroy(sff_class);
+    return err;
+}
+
+static void __exit switchboard_exit(void)
+{
+    i2c_del_driver(&switchboard_driver);
+    class_destroy(sff_class);
+}
+
+module_init(switchboard_init);
+module_exit(switchboard_exit);
 
 MODULE_AUTHOR("Celestica Inc.");
 MODULE_DESCRIPTION("Celestica CPLD switchboard driver");
