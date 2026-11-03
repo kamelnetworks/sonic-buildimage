@@ -154,7 +154,28 @@ reload_configdb()
     CONFIG_FILE=${1}
 
     echo "Reloading existing config db..."
-    config reload ${CONFIG_FILE} -y -n
+    if config reload ${CONFIG_FILE} -y -n; then
+        return 0
+    fi
+
+    # config reload validates the config against the YANG models before it
+    # loads anything, but only skips that validation (-f) when it is given no
+    # file name, which is how the image-upgrade migration calls it. With a
+    # file name the validation is unconditional, so retrying is pointless.
+    if [ -n "${CONFIG_FILE}" ]; then
+        return 1
+    fi
+
+    # A config_db.json written by an older image or by hand can fail the
+    # validation although it booted fine before: the 202411 CLI writes
+    # MGMT_INTERFACE without the MGMT_PORT entry the YANG leafref requires
+    # (kamelnetworks/sonic-buildimage#68, sonic-net/sonic-buildimage#30195).
+    # Giving up here leaves the switch with no configuration at all, not even
+    # its management IP, so load the old config anyway and keep the
+    # validation error above in the journal for the operator to fix.
+    echo "Existing config db failed validation, loading it without validation..."
+    logger -t config-setup -p user.warning "config_db.json failed YANG validation; loaded with 'config reload -f'. Run 'config reload' by hand to see the errors."
+    config reload -y -n -f
 }
 
 # Restore SONiC configuration from a backup copy
