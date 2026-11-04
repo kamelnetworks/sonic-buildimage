@@ -1,0 +1,8 @@
+SPATH       := $($(VS_PLATFORM_MODULE)_SRC_PATH)
+DEP_FILES   := $(SONIC_COMMON_FILES_LIST) platform/vs/platform-modules-vs.mk platform/vs/platform-modules-vs.dep
+DEP_FILES   += $(SONIC_COMMON_BASE_FILES_LIST)
+DEP_FILES   += $(shell git ls-files $(SPATH))
+
+$(VS_PLATFORM_MODULE)_CACHE_MODE  := GIT_CONTENT_SHA
+$(VS_PLATFORM_MODULE)_DEP_FLAGS   := $(SONIC_COMMON_FLAGS_LIST)
+$(VS_PLATFORM_MODULE)_DEP_FILES   := $(DEP_FILES)
