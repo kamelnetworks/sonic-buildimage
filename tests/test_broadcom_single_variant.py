@@ -96,7 +96,10 @@ class BroadcomSingleVariantTest(unittest.TestCase):
     def test_installer_has_no_dependent_machines(self):
         self.assertEqual(self.variable('sonic-broadcom.bin_MACHINE'), ['broadcom'])
         self.assertEqual(self.variable('sonic-broadcom.bin_DEPENDENT_MACHINE'), [])
-        self.assertEqual(self.variable('SONIC_RFS_TARGETS'), ['sonic-broadcom.bin__broadcom__rfs.squashfs'])
+        # Other installers (sonic-broadcom.raw, sonic-aboot-broadcom.swi) keep
+        # their own machine lists; CI builds only sonic-broadcom.bin.
+        self.assertEqual([t for t in self.variable('SONIC_RFS_TARGETS') if t.startswith('sonic-broadcom.bin__')],
+                         ['sonic-broadcom.bin__broadcom__rfs.squashfs'])
 
     def test_variant_only_packages_are_not_in_the_image(self):
         dockers = self.variable('sonic-broadcom.bin_DOCKERS') + self.variable('SONIC_INSTALL_DOCKER_IMAGES')
