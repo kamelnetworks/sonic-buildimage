@@ -79,22 +79,27 @@ class DpkgCacheCoverageTest(unittest.TestCase):
         p = subprocess.run(cmd, cwd=self.tree, text=True, env=GIT_ENV,
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertEqual(p.returncode, 0, f'{" ".join(cmd)} failed:\n{p.stdout}\n{p.stderr}')
-        found = re.findall(r'Cache is not enabled for (\S+) package', p.stdout + p.stderr)
-        self.assertTrue(found, 'no parse-time cache report; is SONIC_DPKG_CACHE_METHOD honoured?')
-        return sorted(set(found))
+        return sorted(set(re.findall(r'Cache is not enabled for (\S+) package', p.stdout + p.stderr)))
 
-    def check(self, platform):
-        offenders = [pkg for pkg in self.uncached(platform) if not any(a.match(pkg) for a in ALLOWED)]
+    def check(self, platform, expect=()):
+        uncached = self.uncached(platform)
+        # The packages that can never be cached prove that the parse-time
+        # report is working (an empty list would otherwise pass trivially).
+        for pkg in expect:
+            self.assertTrue(any(re.match(pkg, u) for u in uncached),
+                            f'{platform}: expected {pkg!r} in the uncached report, got {uncached}')
+        offenders = [pkg for pkg in uncached if not any(a.match(pkg) for a in ALLOWED)]
         self.assertEqual(offenders, [], f'{platform}: packages built from source but not cached: {offenders}')
 
     def test_broadcom(self):
-        self.check('broadcom')
+        self.check('broadcom', expect=(r'^libsaibcm_',))
 
     def test_marvell_teralynx(self):
+        # Nothing is left out here; the mechanism is proven by the other two.
         self.check('marvell-teralynx')
 
     def test_vs(self):
-        self.check('vs')
+        self.check('vs', expect=(r'^sonic_version\.yml$',))
 
 
 if __name__ == '__main__':
