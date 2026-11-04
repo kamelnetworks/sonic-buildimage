@@ -99,6 +99,11 @@ on:
         required: false
         type: boolean
         default: true
+      slave_tar_cache:
+        description: 'Also keep a docker-save tar of the slave image on the persistent cache PVC and load it instead of pulling from GHCR (#56)'
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -433,7 +438,18 @@ jobs:
         # pulled image to the local name:tag form the Makefile inspects and
         # pass SONIC_SLAVE_REUSE_*; the reuse tag equals the computed tag, so
         # Makefile.work's stale-tag guard passes by construction.
+        #
+        # The GHCR pull of the ~10 GB slave image took 7-8 min on every job
+        # (rc1 run 41798236605: downloads done after 2.7 min, layer extraction
+        # until 7.2 min). The dind image store lives on the per-pod ephemeral
+        # PVC, so nothing survives between pods except /var/cache/sonic. A
+        # docker-save tar of the image is kept there (slave-images/<tag>.tar,
+        # keyed by the same content-addressed tag) and loaded before falling
+        # back to GHCR (#56).
         if: ${{ inputs.slave_cache }}
+        env:
+          SLAVE_TAR_CACHE: ${{ inputs.slave_tar_cache }}
+          CACHE_SOURCE_INPUT: ${{ inputs.cache_source }}
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
@@ -450,14 +466,40 @@ jobs:
           ghcr_ref="ghcr.io/kamelnetworks/$img_tag"
           echo "slave base image: $img_tag (GHCR: $ghcr_ref)"
           echo "SLAVE_IMAGE_REF=$ghcr_ref" >> "$GITHUB_ENV"
-          if docker pull "$ghcr_ref"; then
-            docker tag "$ghcr_ref" "$img_tag"
+          # The tar directory sits next to the DPKG cache on the persistent
+          # PVC (cache_source is <pvc>/artifacts). Pods of one run share it.
+          tar_dir="$(dirname "$CACHE_SOURCE_INPUT")/slave-images"
+          tar_file="$tar_dir/${name//\//_}-$tag.tar"
+          echo "SLAVE_TAR_FILE=$tar_file" >> "$GITHUB_ENV"
+          echo "SLAVE_TAR_SAVED=false" >> "$GITHUB_ENV"
+          reused=false
+          if [[ "$SLAVE_TAR_CACHE" == true && -s "$tar_file" ]]; then
+            echo "loading slave image from $tar_file ($(du -h "$tar_file" | cut -f1))"
+            SECONDS=0
+            if docker load -i "$tar_file" && docker image inspect "$img_tag" >/dev/null 2>&1; then
+              echo "slave image loaded from the cache tar in ${SECONDS}s"
+              echo "SLAVE_TAR_SAVED=true" >> "$GITHUB_ENV"
+              reused=true
+            else
+              echo "::warning::docker load of $tar_file failed after ${SECONDS}s; falling back to GHCR"
+              docker image rm -f "$img_tag" >/dev/null 2>&1 || true
+            fi
+          fi
+          if [[ "$reused" == false ]]; then
+            SECONDS=0
+            if docker pull "$ghcr_ref"; then
+              echo "slave image pulled from GHCR in ${SECONDS}s"
+              docker tag "$ghcr_ref" "$img_tag"
+              reused=true
+            fi
+          fi
+          if [[ "$reused" == true ]]; then
             opts="$BUILD_OPTS SONIC_SLAVE_REUSE_SLAVE=y"
             opts="$opts SONIC_SLAVE_REUSE_TRIXIE_IMAGE=$name"
             opts="$opts SONIC_SLAVE_REUSE_TRIXIE_TAG=$tag"
             echo "BUILD_OPTS=$opts" >> "$GITHUB_ENV"
             echo "SLAVE_REUSED=true" >> "$GITHUB_ENV"
-            echo "slave image reused from GHCR"
+            echo "slave image reused"
           else
             echo "SLAVE_REUSED=false" >> "$GITHUB_ENV"
             echo "no cached slave image; the build will produce one"
@@ -499,6 +541,39 @@ jobs:
           else
             echo "::warning::slave image $local_ref not found to push"
           fi
+
+      - name: Save slave image tar to the cache PVC (for the next pod)
+        # After Configure the image exists locally whether it was loaded,
+        # pulled or built. Write it once per tag, atomically (three matrix
+        # jobs may race for the same tag), and keep only the two newest tars
+        # so the PVC does not fill up with ~10 GB per slave revision.
+        if: ${{ inputs.slave_cache && inputs.slave_tar_cache && env.SLAVE_TAR_SAVED == 'false' && success() }}
+        run: |
+          local_ref=${SLAVE_IMAGE_REF#ghcr.io/kamelnetworks/}
+          if ! docker image inspect "$local_ref" >/dev/null 2>&1; then
+            echo "::warning::slave image $local_ref not found; not saving a tar"
+            exit 0
+          fi
+          tar_dir=$(dirname "$SLAVE_TAR_FILE")
+          mkdir -p "$tar_dir"
+          df -h "$tar_dir" | tail -1
+          SECONDS=0
+          tmp="$SLAVE_TAR_FILE.tmp.$RUNNER_NAME.$$"
+          if docker save -o "$tmp" "$local_ref"; then
+            if [[ -s "$SLAVE_TAR_FILE" ]]; then
+              echo "another job saved $SLAVE_TAR_FILE first"
+              rm -f "$tmp"
+            else
+              mv -f "$tmp" "$SLAVE_TAR_FILE"
+              echo "saved $SLAVE_TAR_FILE ($(du -h "$SLAVE_TAR_FILE" | cut -f1)) in ${SECONDS}s"
+            fi
+          else
+            echo "::warning::docker save failed after ${SECONDS}s"
+            rm -f "$tmp"
+          fi
+          # Newest two by mtime stay; the current tag is among them.
+          ls -1t "$tar_dir"/*.tar 2>/dev/null | tail -n +3 | xargs -r rm -fv
+          ls -la "$tar_dir"
 
       - name: Build (debug-tools image + docker-*-dbg.gz)
         # Only for full-image builds; a targets override replaces the whole
