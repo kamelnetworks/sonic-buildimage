@@ -92,7 +92,7 @@ class DpkgCacheCoverageTest(unittest.TestCase):
         self.assertEqual(offenders, [], f'{platform}: packages built from source but not cached: {offenders}')
 
     def test_broadcom(self):
-        self.check('broadcom', expect=(r'^libsaibcm_',))
+        self.check('broadcom', expect=(r'^libsaicredo_',))
 
     def test_marvell_teralynx(self):
         # Nothing is left out here; the mechanism is proven by the other two.
