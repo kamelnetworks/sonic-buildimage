@@ -1,7 +1,8 @@
 include $(PLATFORM_PATH)/sai-modules.mk
 include $(PLATFORM_PATH)/sai-xgs.mk
-include $(PLATFORM_PATH)/sai-dnx.mk
-include $(PLATFORM_PATH)/sai-legacy-th.mk
+# sai-dnx.mk, sai-legacy-th.mk, docker-syncd-brcm-dnx*.mk and
+# docker-syncd-brcm-legacy-th*.mk are not included: the broadcom-dnx and
+# broadcom-legacy-th installer variants are not built (see one-image.mk, #56).
 include $(PLATFORM_PATH)/sswsyncd.mk
 # TODO(trixie): re-enable modules after updating for Trixie
 include $(PLATFORM_PATH)/platform-modules-nokia.mk
@@ -28,8 +29,6 @@ include $(PLATFORM_PATH)/platform-modules-micas.mk
 include $(PLATFORM_PATH)/docker-syncd-brcm.mk
 include $(PLATFORM_PATH)/docker-syncd-brcm-rpc.mk
 include $(PLATFORM_PATH)/docker-saiserver-brcm.mk
-include $(PLATFORM_PATH)/docker-syncd-brcm-legacy-th.mk
-include $(PLATFORM_PATH)/docker-syncd-brcm-legacy-th-rpc.mk
 ifeq ($(INCLUDE_PDE), y)
 include $(PLATFORM_PATH)/docker-pde.mk
 include $(PLATFORM_PATH)/sonic-pde-tests.mk
@@ -38,8 +37,6 @@ include $(PLATFORM_PATH)/one-image.mk
 include $(PLATFORM_PATH)/raw-image.mk
 include $(PLATFORM_PATH)/one-aboot.mk
 include $(PLATFORM_PATH)/libsaithrift-dev.mk
-include $(PLATFORM_PATH)/docker-syncd-brcm-dnx.mk
-include $(PLATFORM_PATH)/docker-syncd-brcm-dnx-rpc.mk
 ifeq ($(INCLUDE_GBSYNCD), y)
 include $(PLATFORM_PATH)/../components/docker-gbsyncd-credo.mk
 include $(PLATFORM_PATH)/../components/docker-gbsyncd-broncos.mk
