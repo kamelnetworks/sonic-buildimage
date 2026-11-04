@@ -143,6 +143,10 @@ class Sfp(SfpOptoeBase):
         Returns:
             A Boolean, True if lpmode is enabled, False if disabled
         """
+        if self.port_type != 'QSFP':
+            # SFP+ cages have no LPMode signal (and no QSFPxx sysfs node).
+            return False
+
         try:
             port_lpmode_path = self.LP_PATH.format(self.index + 1)
             with open(port_lpmode_path, 'r') as f:
@@ -201,6 +205,9 @@ class Sfp(SfpOptoeBase):
         Returns:
             A boolean, True if lpmode is set successfully, False if not
         """
+        if self.port_type != 'QSFP':
+            return False
+
         try:
             port_lpmode_path = self.LP_PATH.format(self.index + 1)
             reg_file = open(port_lpmode_path, "r+")

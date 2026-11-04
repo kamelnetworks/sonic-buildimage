@@ -1,3 +1,4 @@
 {
-    "skip_ledd": true 
+    "skip_ledd": true,
+    "enable_xcvrd_sff_mgr": true
 }
