@@ -49,9 +49,13 @@ class Sfp(SfpOptoeBase):
         SfpOptoeBase.__init__(self)
         self.index = index
         self.port_type, self.port_name = self.__get_port_info()
+        # The optoe class the platform init script bound matches the cage.
+        # Probing the inserted media and re-binding the driver writes sysfs,
+        # so it is not done here: every 'show' command that builds a Chassis
+        # builds all Sfps (kamelnetworks/sonic-buildimage#101). The chassis
+        # calls initialize_media() from the change-event path instead.
         self.sfp_type = self.port_type
         self.eeprom_path = '/sys/bus/i2c/devices/i2c-{0}/{0}-0050/eeprom'.format(SFP_I2C_START + index)
-        self._initialize_media()
 
     def __get_port_info(self):
         if self.index >= 0 and self.index <= 31:
@@ -66,9 +70,13 @@ class Sfp(SfpOptoeBase):
     def get_name(self):
         return "SFP/SFP+/SFP28" if self.index < 25 else "QSFP28 or later"
 
-    def _initialize_media(self):
+    def initialize_media(self):
         """
-        Initialize the media type and eeprom driver for SFP
+        Probe the inserted module's media type and bind the matching optoe
+        driver (delete_device/new_device under /sys/bus/i2c). This changes
+        kernel state, so only the daemon that owns the port may call it:
+        Chassis.get_change_event() does, for every insertion event. Never
+        call it from a constructor or a getter.
         """
         if self.get_presence():
             self._probe_media_type()
