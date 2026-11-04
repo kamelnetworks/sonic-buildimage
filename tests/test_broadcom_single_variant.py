@@ -38,6 +38,10 @@ def run(cmd, cwd, **kw):
 
 
 class BroadcomSingleVariantTest(unittest.TestCase):
+    VARIABLES = ('sonic-broadcom.bin_MACHINE', 'sonic-broadcom.bin_DEPENDENT_MACHINE',
+                 'SONIC_RFS_TARGETS', 'sonic-broadcom.bin_DOCKERS', 'SONIC_INSTALL_DOCKER_IMAGES',
+                 'sonic-broadcom.bin_LAZY_BUILD_INSTALLS', 'SONIC_ONLINE_DEBS', 'SONIC_DOCKER_IMAGES')
+
     @classmethod
     def setUpClass(cls):
         for tool in ('git', 'make'):
@@ -54,15 +58,24 @@ class BroadcomSingleVariantTest(unittest.TestCase):
         (cls.tree / '.arch').write_text('amd64\n')
         for sub in ('debs', 'python-wheels'):
             (cls.tree / 'target' / sub / BLDENV).mkdir(parents=True)
-        # -p dumps the database after parsing; -n keeps make from building.
-        cmd = ['make', '-f', 'slave.mk', '--no-print-directory', '-pn',
+        # A second makefile adds a target that prints the expanded values; the
+        # make database (-p) would show recursive variables unexpanded.
+        printer = cls.tree / 'print-vars.mk'
+        printer.write_text('print-vars:\n' + ''.join(
+            f'\t@echo "{v}=$({v})"\n' for v in cls.VARIABLES))
+        cmd = ['make', '-f', 'slave.mk', '-f', str(printer), '--no-print-directory', '-s',
                'PLATFORM=broadcom', 'PLATFORM_ARCH=amd64', f'BLDENV={BLDENV}',
                'SLAVE_BASE_TAG=test', 'SONIC_DPKG_CACHE_METHOD=none',
-               'SONIC_BUILD_QUIETER=1', 'INSHOOKS=', '.platform']
+               'SONIC_BUILD_QUIETER=1', 'INSHOOKS=', 'print-vars']
         p = subprocess.run(cmd, cwd=cls.tree, text=True, env=GIT_ENV,
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         assert p.returncode == 0, f'{" ".join(cmd)} failed:\n{p.stdout[-3000:]}\n{p.stderr[-3000:]}'
-        cls.database = p.stdout
+        cls.values = {}
+        for line in p.stdout.splitlines():
+            name, sep, value = line.partition('=')
+            if sep and name in cls.VARIABLES:
+                cls.values[name] = value.split()
+        assert set(cls.values) == set(cls.VARIABLES), f'missing: {set(cls.VARIABLES) - set(cls.values)}\n{p.stdout[-2000:]}'
 
     @classmethod
     def tearDownClass(cls):
@@ -74,9 +87,7 @@ class BroadcomSingleVariantTest(unittest.TestCase):
         cls.temp.cleanup()
 
     def variable(self, name):
-        m = re.search(rf'^{re.escape(name)} :?= ?(.*)$', self.database, re.M)
-        self.assertIsNotNone(m, f'{name} not in the make database')
-        return m.group(1).split()
+        return self.values[name]
 
     def test_release_platforms_are_plain_broadcom(self):
         for platform in RELEASE_PLATFORMS:
@@ -94,8 +105,10 @@ class BroadcomSingleVariantTest(unittest.TestCase):
         lazy = self.variable('sonic-broadcom.bin_LAZY_BUILD_INSTALLS')
         self.assertTrue(any(d.startswith('opennsl-modules_') for d in lazy), lazy)
         self.assertEqual([d for d in lazy if 'dnx' in d or 'legacy-th' in d], [])
-        self.assertNotIn('libsaibcm_dnx', self.database)
-        self.assertEqual(self.variable('SONIC_ONLINE_DEBS').count('libsaibcm_13.2.1.120_amd64.deb'), 0)
+        online = self.variable('SONIC_ONLINE_DEBS')
+        self.assertTrue(any(d.startswith('libsaibcm_15.') for d in online), online)
+        self.assertEqual([d for d in online if d.startswith('libsaibcm_dnx') or d.startswith('libsaibcm_13.')], [])
+        self.assertEqual([d for d in self.variable('SONIC_DOCKER_IMAGES') if 'dnx' in d or 'legacy-th' in d], [])
 
 
 if __name__ == '__main__':
