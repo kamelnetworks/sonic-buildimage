@@ -1,0 +1,30 @@
+# Runs tests/test_docker_image_load.sh: the docker-image-load recipe of slave.mk
+# against archives saved under another tag than the current build expects
+# (cached docker-*.gz from another branch or INSTALL_DEBUG_TOOLS setting, #113).
+# It needs docker, which the hosted runner has; fork-unit-tests.yml (#114) runs
+# only test_*.py in tests/, so this one has its own workflow.
+name: docker-image-load recipe
+
+on:
+  pull_request:
+    paths:
+      - 'slave.mk'
+      - 'Makefile.cache'
+      - 'scripts/docker_image_load.sh'
+      - 'tests/test_docker_image_load.sh'
+      - '.github/workflows/docker-image-load.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recipe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Load archives saved under other tags
+        run: tests/test_docker_image_load.sh
