@@ -4,9 +4,13 @@ DEP_FILES   := $(SONIC_COMMON_FILES_LIST) rules/sonic-device-data.mk rules/sonic
 DEP_FILES   += $(SONIC_COMMON_BASE_FILES_LIST)
 DEP_FILES   += $(shell git ls-files $(SPATH)) $(SONIC_DEVICE_FILES_LIST)
 
-# disable cache for device-data, because before PR24967 rcache can't match wcache.
-# After PR24967, when building vs image and rcache triggered, build will fail.
-$(SONIC_DEVICE_DATA)_CACHE_MODE := none
+# Upstream disables this cache: the device-data build writes the git-ignored
+# device/virtual/x86_64-kvm_x86_64-r0/platform_asic, which build_image.sh's
+# generate_device_list() read, so a cache hit (no build) dropped the virtual
+# platform from the vs installer. build_image.sh now adds that platform itself,
+# so the ~6 min device-data build is cacheable like any other package (#56).
+# The key covers src/sonic-device-data and every tracked file under device/.
+$(SONIC_DEVICE_DATA)_CACHE_MODE := GIT_CONTENT_SHA
 $(SONIC_DEVICE_DATA)_DEP_FLAGS  := $(SONIC_COMMON_FLAGS_LIST)
 $(SONIC_DEVICE_DATA)_DEP_FILES  := $(DEP_FILES)
 
