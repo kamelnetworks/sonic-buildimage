@@ -1,0 +1,101 @@
+Make the yanglint tcltest suites run without a controlling terminal
+
+The SONiC build runs every package recipe with stdin redirected from
+/dev/null and stdout piped to the log, and the slave container has no
+controlling terminal. Under those conditions the libyang test harness
+had two problems:
+
+1. tests/tool_i.tcl registered its `expect_after { eof ... timeout ... }`
+   before any `spawn`, which binds the patterns to Expect's stdin/stdout
+   channel. With stdin at EOF the `eof` branch fires immediately in the
+   first test of every file, and Expect closes its stdin/stdout pair on
+   the way, so tcltest then dies with
+   `error writing "stdout": bad file number`. Bind the patterns to the
+   spawn ids of the running `expect` command instead.
+
+2. tests/yanglint/interactive/ly.tcl set the width with `stty columns
+   720`, which acts on the controlling terminal. Without one the spawned
+   pty keeps 0 columns, so yanglint's line editor sends a cursor
+   position query and waits forever for an answer. Use Expect's
+   `stty_init`, which is applied to the new pty by `spawn` itself.
+
+3. all.tcl only propagated failed tests to the exit code. A test file that
+   fails to run at all (as in 1.) is reported by tcltest as a file-level
+   error, not counted in numTests, so the suite exited 0 after executing
+   zero tests and ctest reported it as Passed. Propagate the return value
+   of tcltest::runAllTests, which is true when a file failed to run.
+
+Result in the SONiC build: yanglint_interactive goes from
+"Total 0 Passed 0" with 18 file-level errors to "Total 116 Passed 114
+Skipped 2 Failed 0" (the 2 skips carry the `!ctest` constraint).
+
+kamelnetworks/sonic-buildimage#50
+
+diff --git a/tests/tool_i.tcl b/tests/tool_i.tcl
+index fa8c964..5446969 100644
+--- a/tests/tool_i.tcl
++++ b/tests/tool_i.tcl
+@@ -30,7 +30,11 @@ set error_prompt ">>>"
+ set error_head "$error_prompt Check-failed"
+ 
+ # detection on eof and timeout will be on every expect command
+-expect_after {
++# Bind the patterns to the spawn ids of the expect command being executed,
++# not to the spawn id current at this point (the user's stdin/stdout).
++# Otherwise an EOF on stdin, as when the tests run with stdin redirected
++# from /dev/null, matches immediately and also closes stdout.
++expect_after -i $any_spawn_id {
+     eof {
+         global error_head
+         error "$error_head unexpected termination"
+diff --git a/tests/yanglint/interactive/all.tcl b/tests/yanglint/interactive/all.tcl
+index b22a5ab..5d723d8 100644
+--- a/tests/yanglint/interactive/all.tcl
++++ b/tests/yanglint/interactive/all.tcl
+@@ -11,5 +11,10 @@ if {[info exists ::env(TESTS_DIR)]} {
+     tcltest::configure -testdir "$env(TESTS_DIR)/interactive"
+ }
+ 
+-tcltest::runAllTests
++set rc [tcltest::runAllTests]
++# runAllTests returns true if a test file failed to run at all (for example
++# an error outside of a test); such files are not counted in numTests.
++if {$rc ne "" && $rc} {
++    set exitCode 1
++}
+ exit $exitCode
+diff --git a/tests/yanglint/interactive/ly.tcl b/tests/yanglint/interactive/ly.tcl
+index efa57f2..83c4d24 100644
+--- a/tests/yanglint/interactive/ly.tcl
++++ b/tests/yanglint/interactive/ly.tcl
+@@ -13,8 +13,12 @@ set timeout 5
+ set prompt "> "
+ # turn off dialog between expect and yanglint
+ log_user 0
+-# setting some large terminal width
+-stty columns 720
++# setting some large terminal width for the spawned pty
++# (stty_init is applied by spawn to the new pty itself, so it works without
++# a controlling terminal; "stty columns" would only change the controlling
++# terminal and leave the pty with 0 columns, which makes yanglint query the
++# cursor position and wait forever for an answer)
++set stty_init "columns 720"
+ 
+ # default setup for every unit test
+ variable ly_setup {
+diff --git a/tests/yanglint/non-interactive/all.tcl b/tests/yanglint/non-interactive/all.tcl
+index 998c03a..639f1b4 100644
+--- a/tests/yanglint/non-interactive/all.tcl
++++ b/tests/yanglint/non-interactive/all.tcl
+@@ -11,5 +11,10 @@ if {[info exists ::env(TESTS_DIR)]} {
+     tcltest::configure -testdir "$env(TESTS_DIR)/non-interactive"
+ }
+ 
+-tcltest::runAllTests
++set rc [tcltest::runAllTests]
++# runAllTests returns true if a test file failed to run at all (for example
++# an error outside of a test); such files are not counted in numTests.
++if {$rc ne "" && $rc} {
++    set exitCode 1
++}
+ exit $exitCode
