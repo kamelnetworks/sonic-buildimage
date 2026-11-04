@@ -118,6 +118,10 @@ class Chassis(ChassisBase):
                 if(presence and self._global_port_pres_dict[port_num] == '0'):
                     self._global_port_pres_dict[port_num] = '1'
                     port_dict[port_num] = '1'
+                    # Only the owning daemon polls events, so this is the
+                    # one place that may re-bind the optoe driver to the
+                    # inserted media. The first poll reports every populated
+                    # port, which covers media present at boot.
                     self.get_sfp(port_num)._initialize_media(delay=True)
                 elif(not presence and
                         self._global_port_pres_dict[port_num] == '1'):
