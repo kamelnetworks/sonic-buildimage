@@ -94,7 +94,7 @@ class Fan(FanBase):
             cmd = IPMI_GET_PSU_MODEL.format(PSU_FRU_BASE + self.psu_index)
             status, output = self._api_helper.run_command(cmd)
             if status and output:
-                model = output.split(':')[-1]
+                model = output.split(':')[-1].rstrip()
                 if len(model) > 0:
                     if model[-2:] == ' B':
                         direction = self.FAN_DIRECTION_INTAKE
@@ -288,7 +288,9 @@ class Fan(FanBase):
 
         cmd = IPMI_GET_PRESENCE.format(self._fan_status_offset)
         status, output = self._api_helper.run_command(cmd)
-        if status and output == "00":
+        # ipmitool prints each byte with a leading space (" 00"), and
+        # subprocess.getstatusoutput only drops the trailing newline.
+        if status and output.strip() == "00":
             presence = True
 
         return presence
