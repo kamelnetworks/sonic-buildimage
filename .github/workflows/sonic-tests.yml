@@ -15,7 +15,7 @@ on:
         options: [unit, dvs, kvm]
       packages:
         description: 'unit suite: comma-separated package keys from .github/unit-tests.json (empty = all)'
-        default: 'sonic-buildimage,sonic-config-engine,sonic-bgpcfgd'
+        default: 'sonic-buildimage,sonic-config-engine,sonic-bgpcfgd,seastone2-platform'
       slave_cache:
         description: 'Reuse the GHCR-cached slave image (fall back to building it)'
         type: boolean

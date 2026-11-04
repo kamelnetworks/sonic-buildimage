@@ -39,5 +39,13 @@
     ],
     "workdir": ".",
     "pytest_path": "tests"
+  },
+  "seastone2-platform": {
+    "image": "target/docker-config-engine-trixie.gz",
+    "pip": [
+      "pytest"
+    ],
+    "workdir": "platform/broadcom/sonic-platform-modules-cel/seastone2",
+    "pytest_path": "tests"
   }
 }
