@@ -103,8 +103,12 @@ class OptoeDriverTest(unittest.TestCase):
                 % (name, sorted(ids), sorted(missing)))
 
     def test_init_script_loads_optoe_before_instantiating_devices(self):
+        # The devices are created by create_optoe_devices(), which the
+        # start branch calls after its modprobes.
         script = read(INIT_SCRIPT)
-        self.assertLess(script.index('modprobe optoe'), script.index('echo optoe1 0x50'))
+        start = script[script.index('\nstart)'):script.index('\nstop)')]
+        self.assertIn('echo optoe1 0x50', script)
+        self.assertLess(start.index('modprobe optoe'), start.index('create_optoe_devices'))
 
 
 if __name__ == '__main__':
