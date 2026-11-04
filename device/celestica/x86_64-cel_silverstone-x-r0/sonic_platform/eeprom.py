@@ -42,7 +42,7 @@ class Tlv(eeprom_tlvinfo.TlvInfoDecoder):
         for line in lines:
             try:
                 match = re.search(
-                    '(0x[0-9a-fA-F]{2})([\s]+[\S]+[\s]+)([\S]+)', line)
+                    r'(0x[0-9a-fA-F]{2})([\s]+[\S]+[\s]+)([\S]+)', line)
                 if match is not None:
                     idx = match.group(1)
                     value = match.group(3).rstrip('\0')
@@ -81,7 +81,19 @@ class Tlv(eeprom_tlvinfo.TlvInfoDecoder):
         except Exception as E:
             pass
 
-        e = self.read_eeprom()
+        try:
+            e = self.read_eeprom()
+        except (IOError, OSError):
+            if os.geteuid() == 0:
+                raise
+            # The at24 sysfs node is 0600 root, so a non-root caller (e.g.
+            # 'show interfaces status' building a Chassis via is_rj45_port())
+            # can't read it. Don't fail Chassis creation; use the contents
+            # syseepromd published in STATE_DB, which read_eeprom_db()
+            # printed above (empty if STATE_DB has none yet). See #62.
+            decode_output = sys.stdout.getvalue()
+            sys.stdout = original_stdout
+            return self.__parse_output(decode_output)
         if e is None:
             return 0
 
