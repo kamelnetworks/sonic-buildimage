@@ -13,3 +13,5 @@ setup(
     packages=['sonic_platform'],
     package_dir={'sonic_platform': 'sonic_platform'}
 )
+
+# CI measurement (#56): no-op leaf change to time a "normal build" on a warm cache.

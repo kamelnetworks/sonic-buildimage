@@ -32,3 +32,5 @@ setup(
     ],
     keywords='sonic SONiC platform PLATFORM',
 )
+
+# CI measurement (#56): no-op leaf change to time a "normal build" on a warm cache.
