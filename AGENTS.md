@@ -123,3 +123,7 @@ doesn't replace them.
 - **Reachability:** the lab is only reachable through `oob-rl-sw1` (Pomerium).
   Agent pods without lab network access can't do hardware work; hand it to a
   session that has access.
+- **Hands needed:** for anything physical (fitting or swapping optics and
+  cables, reseating, a manual power cycle), open a "Lab request" issue
+  (`lab-request` label) and link it from the blocked issue. Don't leave the
+  ask buried in a PR comment.

@@ -1,0 +1,93 @@
+name: Lab request (on-site action)
+description: Ask a person at the SONIX lab to do something physical that an agent or remote session can't do.
+title: "Lab request: "
+labels: ["lab-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For things that need hands in the lab: fitting or swapping optics and
+        cables, reseating a module, moving a console cable, a manual power
+        cycle. Anything that can be done over SSH or the console isn't a lab
+        request.
+
+        One request per trip-sized job. Say exactly what to touch, so whoever
+        picks it up doesn't need to read the blocked issue first. Reserve the
+        switch (`bin/lab-reserve`) for the time of the visit if the action
+        disturbs it, and say here who holds the lease.
+  - type: input
+    id: blocks
+    attributes:
+      label: Blocks
+      description: The issue(s) or PR(s) waiting on this.
+      placeholder: "#108"
+    validations:
+      required: true
+  - type: dropdown
+    id: urgency
+    attributes:
+      label: Urgency
+      options:
+        - Release blocker (202611-pre can't ship without it)
+        - Next lab visit
+        - Whenever convenient
+    validations:
+      required: true
+  - type: checkboxes
+    id: devices
+    attributes:
+      label: Devices
+      options:
+        - label: ixp-lab-sw1 (Silverstone-X DS4001)
+        - label: ixp-lab-sw2 (HPE 3132Q / Seastone 2)
+        - label: ixp-lab-sw3 (HPE 3132Q / Seastone 2)
+        - label: ixp-lab-sw4 (Dell S5232F-ON)
+        - label: ixp-lab-eos1 (Arista 7050QX)
+        - label: Other (say which below)
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind of action
+      multiple: true
+      options:
+        - Fit a new optic, DAC or cable
+        - Swap or move an existing optic or cable
+        - Reseat a module or cable
+        - Manual power cycle
+        - Console or management cabling
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: action
+    attributes:
+      label: What to do
+      description: |
+        Step by step: which port or slot, which part (type, speed, power class,
+        reach), and what it connects to. Include the parts needed, so they can
+        be brought along.
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: How to tell it's done
+      description: |
+        What the requester will check remotely afterwards, and what the person
+        in the lab should report back (ports used, part numbers, serials).
+    validations:
+      required: true
+  - type: textarea
+    id: afterwards
+    attributes:
+      label: Afterwards
+      description: Should the change stay, or be undone after the test? Anything to restore.
+      placeholder: Leave fitted; it's useful for later regression tests.
+  - type: input
+    id: requester
+    attributes:
+      label: Requested by
+      description: The person, or the agent session and the human it reports to.
+      placeholder: "Sonic-Github agent session for @bluecmd"
+    validations:
+      required: true
