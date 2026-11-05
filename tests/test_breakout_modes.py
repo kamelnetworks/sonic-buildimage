@@ -12,6 +12,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -68,7 +69,9 @@ class PlatformDataTest(unittest.TestCase):
         _, (plat,) = run_check(S5232F)
         for name, props in plat.interfaces.items():
             if len(props["lanes"]) == 4:
-                self.assertEqual(sorted(props["modes"]), ["1x100G[50G,40G]", "2x50G", "4x25G[10G]"], name)
+                # Port 32 has no 4-way mode: its 4th child would be logical 130, the second SFP+.
+                expected = ["1x100G[50G,40G]", "2x50G"] + ([] if name == "Ethernet124" else ["4x25G[10G]"])
+                self.assertEqual(sorted(props["modes"]), expected, name)
         # Second SFP+ port shares physical lane 128 with the last QSFP28 on Trident 3 (vendor config convention).
         self.assertEqual(plat.interfaces["Ethernet129"]["lanes"], ["128"])
 
@@ -238,11 +241,12 @@ class ConfigBcmTest(unittest.TestCase):
         self.assertTrue(any("management port 66" in i for i in report.infos))
 
         # Numbering physical 65 as logical 65 leaves no room: lane 66 would need
-        # logical 66, the management port.
+        # logical 66, the management port. Only the 4-way modes start a child
+        # on lane 66; 2x50G children start on lanes 65 and 67.
         report = cbm.Report()
         cbm.check_config_bcm(plat, "X", self.write_td3_config("portmap_65=65:100\n"), report)
-        self.assertTrue(any("breakout of Ethernet64 needs logical port 66, which is the management port" in w
-                            for w in report.warnings), report.warnings)
+        self.assertTrue(any("Ethernet64 mode 4x10G, 4x25G[10G] needs logical port 66 for its child on lane 66, "
+                            "but that is the management port" in e for e in report.errors), report.errors)
 
         # Any other port squatting on an id the breakout needs is a plain error.
         report = cbm.Report()
@@ -255,11 +259,52 @@ class ConfigBcmTest(unittest.TestCase):
         cbm.check_config_bcm(plat, "X", self.write_td3_config("port_flex_enable_2=0\n"), report)
         self.assertTrue(any("port_flex_enable_2=0 pins a lane of Ethernet0" in e for e in report.errors), report.errors)
 
-    def test_s5232f_port32_warning(self):
-        """Dell maps the second SFP+ to logical 130, the id a 4-way breakout of port 32 needs."""
-        report, _ = run_check(S5232F)
-        self.assertTrue(any("breakout of Ethernet124 needs logical port 130" in w for w in report.warnings), report.warnings)
+    def test_mixed_sister_oversub(self):
+        """Seastone 2 2x50G was refused on hardware without oversubscribe_mixed_sister_25_50_enable=1 (#172)."""
+        _, (plat,) = run_check(SEASTONE2)
+        report = cbm.Report()
+        cbm.check_config_bcm(plat, "X", self.write_td3_config("oversubscribe_mode=1\n"), report)
+        self.assertTrue(any("oversubscribe_mixed_sister_25_50_enable=1 is missing" in e for e in report.errors),
+                        report.errors)
+        report = cbm.Report()
+        cbm.check_config_bcm(plat, "X", self.write_td3_config("oversubscribe_mode=1\n"), report, dpb=False)
+        self.assertEqual(report.errors, [])
+        self.assertTrue(any("oversubscribe_mixed_sister_25_50_enable=1 is missing" in w for w in report.warnings),
+                        report.warnings)
+        report = cbm.Report()
+        cbm.check_config_bcm(plat, "X", self.write_td3_config(
+            "oversubscribe_mode=1\noversubscribe_mixed_sister_25_50_enable=1\n"), report)
+        self.assertEqual(report.errors, [])
+        for name in ("td3-seastone_2-32x100G.config.bcm", "td3-seastone_2-32x100G-vxlan.config.bcm"):
+            props, _ = cbm.parse_config_bcm(os.path.join(SEASTONE2, "Seastone_2", name))
+            self.assertEqual(props.get("oversubscribe_mixed_sister_25_50_enable"), "1", name)
 
+    def test_s5232f_port32_has_no_4way_mode(self):
+        """Dell maps the second SFP+ to logical 130, the id a 4-way breakout of port 32 needs.
+
+        On hardware (#102, #172) the SAI creates the first three 4x25G children
+        of Ethernet124 and refuses the fourth ("Dynamic port config failed 130"),
+        so platform.json offers only 1x100G and 2x50G on that port.
+        """
+        report, (plat,) = run_check(S5232F)
+        self.assertEqual(report.errors, [])
+        self.assertEqual(sorted(plat.interfaces["Ethernet124"]["modes"]), ["1x100G[50G,40G]", "2x50G"])
+        self.assertIn("4x25G[10G]", plat.interfaces["Ethernet120"]["modes"])
+
+        # Offering the 4-way mode again is an error against Dell's config.bcm.
+        with open(os.path.join(S5232F, "platform.json")) as f:
+            data = json.load(f)
+        data["interfaces"]["Ethernet124"]["breakout_modes"]["4x25G[10G]"] = ["etp32a", "etp32b", "etp32c", "etp32d"]
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        with open(os.path.join(tmp, "platform.json"), "w") as f:
+            json.dump(data, f)
+        report = cbm.Report()
+        plat4 = cbm.Platform(tmp, report)
+        cbm.check_config_bcm(plat4, "DellEMC-S5232f-C32", os.path.join(
+            S5232F, "DellEMC-S5232f-C32", "td3-s5232f-32x100G.config.bcm"), report)
+        self.assertTrue(any("Ethernet124 mode 4x25G[10G] needs logical port 130 for its child on lane 128" in e
+                            for e in report.errors), report.errors)
 
 if __name__ == "__main__":
     unittest.main()

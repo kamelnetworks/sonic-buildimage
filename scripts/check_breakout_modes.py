@@ -378,7 +378,8 @@ def parse_config_bcm(path):
     return props, portmaps
 
 
-def check_config_bcm(platform, hwsku, path, report):
+def check_config_bcm(platform, hwsku, path, report, dpb=True):
+    """``dpb``: the HWSKU has a hwsku.json, so the breakout CLI can use every platform.json mode."""
     tag = "%s/%s %s" % (platform.name, hwsku, os.path.basename(path))
     props, portmaps = parse_config_bcm(path)
     if props.get("port_flex_enable") != "1":
@@ -397,21 +398,41 @@ def check_config_bcm(platform, hwsku, path, report):
             report.error("%s: no portmap for physical port %d (%s), the port macro is not configured" % (tag, first, name))
             continue
         base_logical = by_phys[first]
-        # The SDK numbers the children of a flexed macro from the macro's
-        # logical port upwards (Trident 3: physical 65 is logical 67 because
-        # 66 is a management port), so those ids must be free.
-        for offset in range(len(lanes)):
+        # The SDK numbers the children of a flexed macro after the lane they
+        # start on (Trident 3: logical = macro's logical port + lane offset;
+        # physical 65 is logical 67 because 66 is a management port), so the
+        # ids of every child the offered modes can create must be free.
+        # Hardware (S5232F port 32, #102/#172): a child on a management
+        # port's id is refused ("Dynamic port config failed 130"), so a mode
+        # that needs one must not be offered.
+        needed = {}
+        for mode in props_if["modes"]:
+            for child, row in platform.children(name, mode).items():
+                offset = lanes.index(int(row["lanes"].split(",")[0]))
+                needed.setdefault(offset, []).append((mode, child))
+        for offset in sorted(needed):
             logical = base_logical + offset
+            modes = sorted({m for m, _ in needed[offset]})
             if logical in mgmt:
-                report.warn("%s: a %d-way breakout of %s needs logical port %d, which is the management port on physical "
-                            "port %d; the SDK may refuse that mode, verify on hardware"
-                            % (tag, len(lanes), name, logical, portmaps[logical][0]))
+                report.error("%s: %s mode %s needs logical port %d for its child on lane %d, but that is the management "
+                             "port on physical port %d; the SAI refuses it, drop the mode from platform.json"
+                             % (tag, name, ", ".join(modes), logical, lanes[offset], portmaps[logical][0]))
                 continue
             if logical in portmaps and portmaps[logical][0] not in lanes:
                 report.error("%s: logical port %d is needed for lane %d of %s but maps physical port %d"
                              % (tag, logical, lanes[offset], name, portmaps[logical][0]))
             if props.get("port_flex_enable_%d" % logical) == "0":
                 report.error("%s: port_flex_enable_%d=0 pins a lane of %s" % (tag, logical, name))
+    # Oversubscribed Trident 3: a 50G port next to 25G ports in the same pair
+    # of port macros ("sister" ports) is refused unless enabled explicitly
+    # (Seastone 2 2x50G, #172: "Mixed-sister oversub ports are not supported").
+    speeds = {speed_to_int(row["speed"]) for name, p in platform.interfaces.items() if len(p["lanes"]) > 1
+              for mode in p["modes"] for row in platform.children(name, mode).values()}
+    if (props.get("oversubscribe_mode") == "1" and 50000 in speeds and 25000 in speeds
+            and props.get("oversubscribe_mixed_sister_25_50_enable") != "1"):
+        (report.error if dpb else report.warn)(
+            "%s: platform.json offers 50G and 25G breakouts but oversubscribe_mixed_sister_25_50_enable=1 is "
+            "missing; the SAI refuses a 50G port next to 25G ones" % tag)
     for logical in mgmt:
         if props.get("port_flex_enable_%d" % logical) != "0":
             report.info("%s: management port %d (physical %d) is not excluded from flexing (port_flex_enable_%d=0)"
@@ -484,7 +505,8 @@ def check_hwsku(platform, hwsku_dir, report, emit_hwsku=False):
 
     for entry in sorted(os.listdir(hwsku_dir)):
         if entry.endswith(".config.bcm"):
-            check_config_bcm(platform, hwsku, os.path.join(hwsku_dir, entry), report)
+            check_config_bcm(platform, hwsku, os.path.join(hwsku_dir, entry), report,
+                             dpb=os.path.isfile(os.path.join(hwsku_dir, "hwsku.json")))
 
 
 def check_platform(platform_dir, report, emit_hwsku=False, only_hwsku=None):
