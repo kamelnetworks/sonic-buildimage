@@ -28,6 +28,10 @@ pbmp_xport_xe=0x3ffffffffffffffffffffffffffffffffe
 # management port on physical lane 129 and must not be flexed.
 port_flex_enable=1
 port_flex_enable_66=0
+# 2x50G next to 25G ports needs mixed 25G/50G sister ports in
+# oversubscription; without it the SAI refuses the 50G create ("Mixed-sister
+# oversub ports are not supported"). Dell's S5232F sets the same.
+oversubscribe_mixed_sister_25_50_enable=1
 
 ptp_ts_pll_fref=50000000
 ptp_bs_fref_0=50000000
