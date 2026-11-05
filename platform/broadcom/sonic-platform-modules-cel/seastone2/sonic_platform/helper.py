@@ -3,6 +3,7 @@
 import os
 import struct
 import subprocess
+import time
 from mmap import *
 from sonic_py_common.device_info import get_platform_and_hwsku
 
@@ -10,6 +11,79 @@ SCALE = 16
 BIN_BITS = 8
 EMPTY_STRING = ""
 HOST_CHK_CMD = "docker > /dev/null 2>&1"
+
+# ipmitool reply cache (kamelnetworks/sonic-buildimage#163)
+#
+# Every fan, PSU and thermal attribute on this platform is an `ipmitool`
+# subprocess, and one BMC round trip over KCS takes 0.3-0.8 s on the
+# Seastone 2. thermalctld asks the same question several times per cycle
+# (a fan's presence three times, its speed four times, a thermal's
+# thresholds twice, the fan FRU every minute) and psud polls every 3 s, so
+# the BMC was saturated and a thermalctld cycle took 45-50 s.
+#
+# Read-only ipmitool commands are therefore answered from this per-process
+# cache: sensor readings, presence, CPLD registers and LEDs for a few
+# seconds, FRU records and sensor thresholds (constant while a unit is
+# inserted) for longer. Writes are never cached and drop the cache, so a
+# read after a write sees the new state. A failed command is cached only
+# for the short time, so it is retried soon.
+CACHE_TTL_READ = 10
+CACHE_TTL_STATIC = 300
+# (lower-cased command prefix, TTL)
+CACHE_TTLS = (
+    ("ipmitool raw 0x04 0x2d ", CACHE_TTL_READ),         # Get Sensor Reading
+    ("ipmitool raw 0x04 0x27 ", CACHE_TTL_STATIC),       # Get Sensor Threshold
+    ("ipmitool raw 0x3a 0x03 0x03 ", CACHE_TTL_READ),    # fan / PSU presence
+    ("ipmitool raw 0x3a 0x0c 0x00 0x02 ", CACHE_TTL_READ),  # CPLD register read
+    ("ipmitool raw 0x3a 0x0b ", CACHE_TTL_READ),         # fan LED
+    ("ipmitool fru list ", CACHE_TTL_STATIC),
+    ("ipmitool fru print ", CACHE_TTL_STATIC),
+)
+_cache = {}
+
+
+def clear_cache():
+    """Forgets every cached ipmitool reply."""
+    _cache.clear()
+
+
+def _cache_key_and_ttl(cmd):
+    """
+    Returns the cache key for a command line and how long its reply may be
+    reused: 0 for a command that is not cached, None for an ipmitool command
+    that is not known to be read-only.
+    """
+    key = ' '.join(cmd.split()).lower()
+    for prefix, ttl in CACHE_TTLS:
+        if key.startswith(prefix):
+            return key, ttl
+    return key, None if key.startswith('ipmitool ') else 0
+
+
+def run_ipmitool(cmd):
+    """
+    Runs an ipmitool command line through the cache.
+    Returns:
+        (exit status, output) as subprocess.getstatusoutput does.
+    """
+    key, ttl = _cache_key_and_ttl(cmd)
+    if ttl is None:
+        # A write (LED, threshold, power) or an unknown ipmitool command:
+        # whatever is cached may describe the state before it.
+        _cache.clear()
+    if not ttl:
+        return subprocess.getstatusoutput(cmd)
+
+    now = time.monotonic()
+    entry = _cache.get(key)
+    if entry is not None and entry[0] > now:
+        return entry[1]
+
+    ret, data = subprocess.getstatusoutput(cmd)
+    if ret != 0:
+        ttl = min(ttl, CACHE_TTL_READ)
+    _cache[key] = (now + ttl, (ret, data))
+    return ret, data
 
 
 class APIHelper():
@@ -48,12 +122,12 @@ class APIHelper():
     def run_command(self, cmd):
         status = True
         result = ""
-        ret, data = subprocess.getstatusoutput(cmd)
+        ret, data = run_ipmitool(cmd)
         if ret != 0:
             status = False
         else:
             result = data
-        
+
         return status, result
 
     def read_txt_file(self, file_path):
@@ -95,12 +169,12 @@ class APIHelper():
         status = True
         result = ""
         cmd = "ipmitool raw {} {}".format(str(netfn), str(cmd))
-        ret, data = subprocess.getstatusoutput(cmd)
+        ret, data = run_ipmitool(cmd)
         if ret != 0:
             status = False
         else:
             result = data
-        
+
         return status, result
 
     def ipmi_fru_id(self, id, key=None):
@@ -109,12 +183,12 @@ class APIHelper():
         cmd = "ipmitool fru print {}".format(str(
             id)) if not key else "ipmitool fru print {0} | grep '{1}' ".format(str(id), str(key))
 
-        ret, data = subprocess.getstatusoutput(cmd)
+        ret, data = run_ipmitool(cmd)
         if ret != 0:
             status = False
         else:
             result = data
-        
+
         return status, result
 
     def ipmi_set_ss_thres(self, id, threshold_key, value):
@@ -122,12 +196,12 @@ class APIHelper():
         result = ""
         cmd = "ipmitool sensor thresh '{}' {} {}".format(
             str(id), str(threshold_key), str(value))
-        ret, data = subprocess.getstatusoutput(cmd)
+        ret, data = run_ipmitool(cmd)
         if ret != 0:
             status = False
         else:
             result = data
-        
+
         return status, result
 
     def fru_decode_product_serial(self, data):

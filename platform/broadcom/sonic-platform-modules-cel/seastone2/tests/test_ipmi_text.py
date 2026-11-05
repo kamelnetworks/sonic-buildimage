@@ -139,8 +139,12 @@ class FakeIpmitool:
 
 @pytest.fixture
 def ipmi():
+    """A fake BMC, with the helper's reply cache (#163, test_helper_cache.py)
+    switched off: these tests change replies between calls."""
     fake = FakeIpmitool()
-    with patch.object(subprocess, 'getstatusoutput', fake):
+    helper.clear_cache()
+    with patch.object(subprocess, 'getstatusoutput', fake), \
+            patch.object(helper, 'CACHE_TTLS', ()):
         yield fake
 
 
