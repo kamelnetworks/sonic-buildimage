@@ -38,6 +38,9 @@ class Fan(FanBase):
     # { FANTRAY-ID: FRU-ID }
     FAN_FRU_MAPPING = { 1: 3, 2: 4, 3: 5, 4: 6 }
     PSU_FRU_MAPPING = { 1: 1, 2: 2 }
+    # Airflow token in the PSU FRU "Board Product" string
+    PSU_AIRFLOW_TOKENS = { "IO/PS": FanBase.FAN_DIRECTION_EXHAUST,
+                           "PS/IO": FanBase.FAN_DIRECTION_INTAKE }
 
     def __init__(self, fantray_index=1, fan_index=1, psu_fan=False,
             dependency=None):
@@ -69,6 +72,7 @@ class Fan(FanBase):
             self.fru = IpmiFru(self.PSU_FRU_MAPPING[self.fanindex])
             self.max_speed_offset = PSU_FAN_MAX_SPEED_OFFSET
             self.fan_direction_offset = PSU_FAN_DIRECTION_OFFSET
+            self.psu_fan_direction = None
         self.max_speed = 0
 
     def get_name(self):
@@ -138,22 +142,56 @@ class Fan(FanBase):
         Retrieves the fan airfow direction
         Returns:
             A string, either FAN_DIRECTION_INTAKE or FAN_DIRECTION_EXHAUST
-            depending on fan direction
+            depending on fan direction, or FAN_DIRECTION_NOT_APPLICABLE
+            when the fan is absent or its FRU doesn't tell.
 
         Notes:
             In DellEMC platforms,
             - Forward/Exhaust : Air flows from Port side to Fan side.
             - Reverse/Intake  : Air flows from Fan side to Port side.
+
+            Only the literal 'N/A' (FAN_DIRECTION_NOT_APPLICABLE) makes
+            system-health skip the "direction is not aligned" check, so
+            never return another placeholder such as 'NA'.
         """
         direction = [self.FAN_DIRECTION_EXHAUST, self.FAN_DIRECTION_INTAKE]
         fan_status = self.get_presence()
         if not fan_status:
-            return 'NA'
+            if self.is_psu_fan:
+                # A different PSU may be plugged in next.
+                self.psu_fan_direction = None
+            return self.FAN_DIRECTION_NOT_APPLICABLE
+        if self.is_psu_fan:
+            # `ipmitool fru print` takes about a second over KCS and
+            # thermalctld polls every fan every minute, so read the PSU's
+            # airflow once while it stays present.
+            if self.psu_fan_direction is None:
+                self.psu_fan_direction = self._get_psu_fan_direction()
+            return self.psu_fan_direction or self.FAN_DIRECTION_NOT_APPLICABLE
         is_valid, fan_direction = self.fru.get_fru_data(self.fan_direction_offset)
         if is_valid and fan_direction[0] < len(direction):
             return direction[fan_direction[0]]
         else:
-            return 'NA'
+            return self.FAN_DIRECTION_NOT_APPLICABLE
+
+    def _get_psu_fan_direction(self):
+        """
+        The PSU FRU is a standard IPMI board info area, not Dell's fan tray
+        layout, so there is no direction byte at PSU_FAN_DIRECTION_OFFSET
+        (on the 750W Delta PSU that offset is a space inside the product
+        string). The airflow is the IO/PS (normal, port side to PSU side,
+        exhaust) or PS/IO (reverse, intake) token of the board product, e.g.
+        "PWR SPLY,750W,AC,PS/IO,DELTA", as platform_sensors.py also reads it.
+        """
+        product = self.fru.get_board_product()
+        for token in product.split(','):
+            direction = self.PSU_AIRFLOW_TOKENS.get(token.strip())
+            if direction is not None:
+                return direction
+        if product == 'NA':
+            # FRU not readable right now; retry on the next poll.
+            return None
+        return self.FAN_DIRECTION_NOT_APPLICABLE
 
     def get_speed(self):
         """
