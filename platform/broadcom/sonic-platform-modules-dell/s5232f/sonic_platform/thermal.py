@@ -31,10 +31,36 @@ class Thermal(ThermalBase):
         ['PSU2 Airflow Sensor', 0x8]
     ]
 
+    # Thresholds, in Celsius, for sensors whose BMC sensor data record
+    # carries none: { Sensor-Name: (high, high critical) }. The S5232F BMC
+    # (Celestica, firmware 0.55) reports no thresholds at all for the
+    # 'ASIC On-board' sensor (NPU_Near_temp, 0x2), so get_high_threshold()
+    # fell through to the base class, thermalctld stored 'N/A' and
+    # system-health stayed Not OK with 'Invalid ASIC On-board temperature
+    # data ... threshold=N/A'. The values are the ones Dell's BMC reports for
+    # the same sensor on the sister S5248F-ON: 78 C upper non-critical and
+    # 80 C upper critical (85 C upper non-recoverable). A threshold the BMC
+    # does report always takes precedence over this table.
+    DEFAULT_THRESHOLDS = {
+        'ASIC On-board': (78.0, 80.0),
+    }
+
     def __init__(self, thermal_index=0):
         ThermalBase.__init__(self)
         self.index = thermal_index + 1
         self.sensor = IpmiSensor(self.SENSOR_MAPPING[self.index - 1][1])
+
+    def _get_default_threshold(self, position):
+        """
+        Returns the platform default threshold for this sensor, or None if
+        there is none. position is 0 for the high threshold and 1 for the
+        high critical threshold.
+        """
+        defaults = self.DEFAULT_THRESHOLDS.get(self.get_name())
+        if defaults is None:
+            return None
+
+        return float(defaults[position])
 
     def get_name(self):
         """
@@ -107,7 +133,9 @@ class Thermal(ThermalBase):
         """
         is_valid, high_threshold = self.sensor.get_threshold("UpperNonCritical")
         if not is_valid:
-            return super(Thermal, self).get_high_threshold()
+            high_threshold = self._get_default_threshold(0)
+            if high_threshold is None:
+                return super(Thermal, self).get_high_threshold()
 
         return float(high_threshold)
 
@@ -136,7 +164,9 @@ class Thermal(ThermalBase):
         """
         is_valid, high_crit_threshold = self.sensor.get_threshold("UpperCritical")
         if not is_valid:
-            return super(Thermal, self).get_high_critical_threshold()
+            high_crit_threshold = self._get_default_threshold(1)
+            if high_crit_threshold is None:
+                return super(Thermal, self).get_high_critical_threshold()
 
         return float(high_crit_threshold)
 
