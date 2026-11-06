@@ -590,3 +590,46 @@ def test_route_map_match_ipv6_prefix_set_runtime(run_cmd):
         daemon._BGPConfigDaemon__update_bgp([])
         assert last_cmds() == [['vtysh', '-c', 'configure terminal', '-c', 'route-map RM_IN permit 10',
                                 '-c', '{}match ipv6 address prefix-list PL_V6'.format(prefix)]]
+
+
+def test_route_map_template_ext_community_soo():
+    """#181: 'set extcommunity soo' must carry the route-origin members, not
+    the route-target ones."""
+    result = _render_route_map(ROUTE_MAP={('RM_IN', '10'): {
+        'route_operation': 'permit',
+        'set_ext_community_inline': ['route-target:65000:1', 'route-origin:65000:2']}})
+    assert ' set extcommunity rt 65000:1\n' in result
+    assert ' set extcommunity soo 65000:2\n' in result
+
+    result = _render_route_map(ROUTE_MAP={('RM_IN', '10'): {
+        'route_operation': 'permit',
+        'set_ext_community_inline': ['route-origin:65000:2', 'route-origin:65000:3']}})
+    assert ' set extcommunity soo 65000:2 65000:3\n' in result
+    assert 'set extcommunity rt' not in result
+
+
+def test_route_map_template_set_tag():
+    """#181: ROUTE_MAP.set_tag must render 'set tag'."""
+    result = _render_route_map(ROUTE_MAP={('RM_IN', '10'): {'route_operation': 'permit',
+                                                            'set_tag': '42'}})
+    assert ' set tag 42\n' in result
+
+
+@patch.dict('sys.modules', **mockmapping)
+@patch('frrcfgd.frrcfgd.g_run_command')
+def test_route_map_set_tag_runtime(run_cmd):
+    """#181: a live ROUTE_MAP update with set_tag must program 'set tag', and
+    its delete must remove it."""
+    from frrcfgd.frrcfgd import BGPConfigDaemon, CachedDataWithOp
+    run_cmd.return_value = True
+    daemon = BGPConfigDaemon()
+    daemon.route_map = {'RM_IN': {'10': 'permit'}}
+
+    for op, prefix in ((CachedDataWithOp.OP_ADD, ''), (CachedDataWithOp.OP_DELETE, 'no ')):
+        run_cmd.reset_mock()
+        daemon.bgp_message.put(('RM_IN|10', False, 'ROUTE_MAP',
+                                {'set_tag': CachedDataWithOp('42', op)}))
+        daemon._BGPConfigDaemon__update_bgp([])
+        assert [c[0][1] for c in run_cmd.call_args_list] == [
+            ['vtysh', '-c', 'configure terminal', '-c', 'route-map RM_IN permit 10',
+             '-c', '{}set tag 42'.format(prefix)]]
