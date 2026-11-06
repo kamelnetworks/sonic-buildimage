@@ -24,8 +24,9 @@ _brcm_sai_dyn_port_brkout_config: Dynamic port config failed 130
 port resource multi set failed with error Invalid parameter
 ```
 
-Moving the SFP+ to another id doesn't work: 131 is the loopback port
-(`Port type 6 is not supported TD3`), and ids above 131 belong to no pipe.
+Moving the SFP+ to another id doesn't work. Logical 130 and 131 were tested:
+131 is the loopback port (`Port type 6 is not supported TD3`). Ids above 131
+were not tested, because they belong to no pipe.
 Tested on ixp-lab-sw4 in kamelnetworks/sonic-buildimage#110 and #172.
 
 ## Why we keep the SFP+
@@ -38,3 +39,25 @@ breakout on port 32 (kamelnetworks/sonic-buildimage#110).
 
 `scripts/check_breakout_modes.py` enforces this: it fails on any mode whose
 child needs a management port's logical id.
+
+## What port 32 does on hardware
+
+Tested on ixp-lab-sw4 (rc1 `SONiC.verify_rc1-20261104-kamel.60-5b1565382`,
+libsaibcm 15.2.1.0.0.0.26.3, HWSKU `SONIX`) in
+kamelnetworks/sonic-buildimage#110. The far end (ixp-lab-sw1 QSFP30) stayed
+at 100G, so these results show what the SAI accepts, not that the link comes
+up.
+
+| Step | Result |
+|---|---|
+| `1x100G` at 40G | Accepted. SDK `xe(127)` 40G XLAUI. |
+| `1x100G` at 50G | **Not supported.** STATE_DB `supported_speeds` is `40000,100000` on every 4-lane port, the CLI refuses 50000, and a CONFIG_DB write gets `doPortTask: Unsupported port Ethernet124 speed 50000` (dropped, no crash). |
+| `1x100G` → `2x50G` | Accepted. Children `Ethernet124` (lanes 125-126) and `Ethernet126` (127-128) are logical 127 and 129, 50G KR2. Both SFP+ ports keep logical 66 and 130. |
+| `2x50G` → `1x100G` | Accepted, logical 127 again. As on every Trident 3 port, the re-created 100G port stays in `Fault(Local)` until `systemctl restart swss` (#102). |
+
+The `50G` in `1x100G[50G,40G]` comes from upstream and is on every port of
+this platform. A 4-lane 50G port does not work on this SAI; use `2x50G`.
+
+The stock `config interface breakout` refuses the `SONIX` HWSKU (no
+`hwsku.json`), so the breakout steps were driven the way the CLI would be,
+deleting the last lane first (#170).
