@@ -1,0 +1,417 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Christian Svensson <blue@cmd.nu>
+Date: Fri, 6 Nov 2026 06:29:52 +0000
+Subject: [PATCH] [acl-loader] Convert openconfig source-mac/destination-mac to
+ SRC_MAC/DST_MAC
+
+acl-loader ignored the openconfig l2 source-mac, source-mac-mask,
+destination-mac and destination-mac-mask leaves: convert_l2() only
+converted ethertype and vlan-id. A rule such as "ethertype 0x88b5 and
+source-mac 02:16:90:00:00:01, drop" was installed as ETHER_TYPE only,
+so it matched (and dropped) far more than written, without any error.
+
+Convert them to SRC_MAC/DST_MAC in the "<mac>" or "<mac>/<mask>"
+format of the sonic-types mac-addr-and-mask type. sonic-acl.yang
+allows SRC_MAC/DST_MAC only in tables of the built-in type L2; a
+user defined table type supports them if they are in its MATCHES.
+Fail the rule with an error, like other conversion errors, instead of
+dropping a field when
+  - the table cannot match on the MAC (e.g. an L3 table),
+  - a mask is given without its MAC address, or
+  - any l2 leaf is set that convert_l2() does not convert.
+
+Carried as src/sonic-utilities.patch in kamelnetworks/sonic-buildimage
+(issue #175) until it lands upstream.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_012hdRF8fXTVYxQsK544FtsM
+---
+ acl_loader/main.py          |  52 ++++++++++
+ tests/acl_input/acl_l2.json | 186 ++++++++++++++++++++++++++++++++++++
+ tests/acl_loader_test.py    | 111 +++++++++++++++++++++
+ 3 files changed, 349 insertions(+)
+ create mode 100644 tests/acl_input/acl_l2.json
+
+diff --git a/acl_loader/main.py b/acl_loader/main.py
+index 5cfbca4a..d845909b 100644
+--- a/acl_loader/main.py
++++ b/acl_loader/main.py
+@@ -116,6 +116,10 @@ class AclLoader(object):
+         "IP_L2TP": 115
+     }
+ 
++    # openconfig l2 config leaves that convert_l2() converts
++    l2_converted_fields = {"ethertype", "vlan_id", "source_mac", "source_mac_mask",
++                           "destination_mac", "destination_mac_mask"}
++
+     def __init__(self):
+         self.yang_acl = None
+         self.requested_session = None
+@@ -596,8 +600,56 @@ class AclLoader(object):
+ 
+         return action_count == len(action_props)
+ 
++    def acl_table_has_mac_match(self, tname, match):
++        """
++        Check if the ACL table can match on an outer MAC address (SRC_MAC or DST_MAC).
++        sonic-acl.yang allows SRC_MAC/DST_MAC only in tables of the built-in type L2.
++        A user defined ACL table type supports them if they are in its MATCHES.
++        :param tname: ACL table name
++        :param match: SRC_MAC or DST_MAC
++        :return: True if the table can match on the MAC address
++        """
++        table_type = self.tables_db_info[tname]["type"]
++        if table_type in self.tables_type_info:
++            matches = self.tables_type_info[table_type]["MATCHES"]
++            # A list, or a comma separated string ("INNER_SRC_MAC" must not match "SRC_MAC")
++            if isinstance(matches, str):
++                matches = matches.split(",")
++            return match in [m.strip() for m in matches]
++        return table_type.upper() == "L2"
++
++    def convert_mac(self, table_name, rule_idx, match, mac, mask):
++        """
++        Convert an openconfig MAC address and optional mask to the Config DB
++        "<mac>" or "<mac>/<mask>" format (sonic-types mac-addr-and-mask)
++        """
++        name = "source-mac" if match == "SRC_MAC" else "destination-mac"
++        if not mac:
++            raise AclLoaderException("%s-mask given without %s; table %s rule %s" %
++                                     (name, name, table_name, rule_idx))
++        if not self.acl_table_has_mac_match(table_name, match):
++            raise AclLoaderException("%s (%s) is not supported in table %s of type %s; rule %s" %
++                                     (name, match, table_name, self.tables_db_info[table_name]["type"], rule_idx))
++        return "%s/%s" % (mac, mask) if mask else str(mac)
++
+     def convert_l2(self, table_name, rule_idx, rule):
+         rule_props = {}
++        l2 = rule.l2.config
++
++        # Fail on an l2 leaf that is set but not converted below, instead of
++        # installing a wider rule without it.
++        for leaf in l2._pyangbind_elements:
++            if leaf not in self.l2_converted_fields and getattr(l2, leaf)._changed():
++                raise AclLoaderException("l2 field %s is not supported by acl-loader; table %s rule %s" %
++                                         (leaf.replace("_", "-"), table_name, rule_idx))
++
++        if l2.source_mac or l2.source_mac_mask:
++            rule_props["SRC_MAC"] = self.convert_mac(table_name, rule_idx, "SRC_MAC",
++                                                     l2.source_mac, l2.source_mac_mask)
++
++        if l2.destination_mac or l2.destination_mac_mask:
++            rule_props["DST_MAC"] = self.convert_mac(table_name, rule_idx, "DST_MAC",
++                                                     l2.destination_mac, l2.destination_mac_mask)
+ 
+         if rule.l2.config.ethertype:
+             if rule.l2.config.ethertype in self.ethertype_map:
+diff --git a/tests/acl_input/acl_l2.json b/tests/acl_input/acl_l2.json
+new file mode 100644
+index 00000000..bcaed635
+--- /dev/null
++++ b/tests/acl_input/acl_l2.json
+@@ -0,0 +1,186 @@
++{
++    "acl": {
++        "acl-sets": {
++            "acl-set": {
++                "L2ACL": {
++                    "acl-entries": {
++                        "acl-entry": {
++                            "1": {
++                                "config": {
++                                    "sequence-id": 1
++                                },
++                                "actions": {
++                                    "config": {
++                                        "forwarding-action": "ACCEPT"
++                                    }
++                                },
++                                "l2": {
++                                    "config": {
++                                        "source-mac": "02:16:90:00:00:01"
++                                    }
++                                }
++                            },
++                            "2": {
++                                "config": {
++                                    "sequence-id": 2
++                                },
++                                "actions": {
++                                    "config": {
++                                        "forwarding-action": "ACCEPT"
++                                    }
++                                },
++                                "l2": {
++                                    "config": {
++                                        "ethertype": 34997,
++                                        "source-mac": "02:16:90:00:00:01"
++                                    }
++                                }
++                            },
++                            "3": {
++                                "config": {
++                                    "sequence-id": 3
++                                },
++                                "actions": {
++                                    "config": {
++                                        "forwarding-action": "ACCEPT"
++                                    }
++                                },
++                                "l2": {
++                                    "config": {
++                                        "source-mac": "00:00:00:00:00:00",
++                                        "source-mac-mask": "00:00:00:00:00:00"
++                                    }
++                                }
++                            },
++                            "4": {
++                                "config": {
++                                    "sequence-id": 4
++                                },
++                                "actions": {
++                                    "config": {
++                                        "forwarding-action": "ACCEPT"
++                                    }
++                                },
++                                "l2": {
++                                    "config": {
++                                        "vlan-id": 902,
++                                        "destination-mac": "02:16:90:00:00:00",
++                                        "destination-mac-mask": "ff:ff:ff:00:00:00"
++                                    }
++                                }
++                            },
++                            "5": {
++                                "config": {
++                                    "sequence-id": 5
++                                },
++                                "actions": {
++                                    "config": {
++                                        "forwarding-action": "ACCEPT"
++                                    }
++                                },
++                                "l2": {
++                                    "config": {
++                                        "source-mac": "52:54:00:9A:39:5C",
++                                        "destination-mac": "02:00:00:17:30:01"
++                                    }
++                                }
++                            },
++                            "6": {
++                                "config": {
++                                    "sequence-id": 6
++                                },
++                                "actions": {
++                                    "config": {
++                                        "forwarding-action": "ACCEPT"
++                                    }
++                                },
++                                "l2": {
++                                    "config": {
++                                        "source-mac-mask": "ff:ff:ff:00:00:00"
++                                    }
++                                }
++                            },
++                            "7": {
++                                "config": {
++                                    "sequence-id": 7
++                                },
++                                "actions": {
++                                    "config": {
++                                        "forwarding-action": "ACCEPT"
++                                    }
++                                },
++                                "l2": {
++                                    "config": {
++                                        "destination-mac-mask": "ff:ff:ff:00:00:00"
++                                    }
++                                }
++                            }
++                        }
++                    }
++                },
++                "L2ACL_CUSTOM": {
++                    "acl-entries": {
++                        "acl-entry": {
++                            "1": {
++                                "config": {
++                                    "sequence-id": 1
++                                },
++                                "actions": {
++                                    "config": {
++                                        "forwarding-action": "ACCEPT"
++                                    }
++                                },
++                                "l2": {
++                                    "config": {
++                                        "source-mac": "02:16:90:00:00:01"
++                                    }
++                                }
++                            },
++                            "2": {
++                                "config": {
++                                    "sequence-id": 2
++                                },
++                                "actions": {
++                                    "config": {
++                                        "forwarding-action": "ACCEPT"
++                                    }
++                                },
++                                "l2": {
++                                    "config": {
++                                        "destination-mac": "02:16:90:00:00:01"
++                                    }
++                                }
++                            }
++                        }
++                    }
++                },
++                "DATAACL": {
++                    "acl-entries": {
++                        "acl-entry": {
++                            "1": {
++                                "config": {
++                                    "sequence-id": 1
++                                },
++                                "actions": {
++                                    "config": {
++                                        "forwarding-action": "ACCEPT"
++                                    }
++                                },
++                                "l2": {
++                                    "config": {
++                                        "source-mac": "02:16:90:00:00:01"
++                                    }
++                                },
++                                "ip": {
++                                    "config": {
++                                        "protocol": "IP_TCP"
++                                    }
++                                }
++                            }
++                        }
++                    }
++                }
++            }
++        }
++    }
++}
+diff --git a/tests/acl_loader_test.py b/tests/acl_loader_test.py
+index a68cb93c..b290861e 100644
+--- a/tests/acl_loader_test.py
++++ b/tests/acl_loader_test.py
+@@ -380,3 +380,114 @@ class TestMasicAclLoader(object):
+         acl_loader.load_rules_from_file(os.path.join(test_path, 'acl_input/incremental_2.json'))
+         acl_loader.incremental_update()
+         assert acl_loader.rules_info[(('NTP_ACL', 'RULE_1'))]["PACKET_ACTION"] == "DROP"
++
++
++class TestAclLoaderL2(object):
++    """openconfig l2 source-mac/destination-mac (and masks) to SRC_MAC/DST_MAC"""
++
++    L2_TABLES = {
++        "L2ACL": {"type": "L2", "stage": "ingress", "policy_desc": "L2ACL", "ports": ["Ethernet0"]},
++        "L2ACL_CUSTOM": {"type": "SRCMACONLY", "stage": "ingress", "policy_desc": "L2ACL_CUSTOM",
++                         "ports": ["Ethernet0"]},
++    }
++    L2_TABLE_TYPES = {
++        "SRCMACONLY": {"ACTIONS": "PACKET_ACTION,COUNTER", "BIND_POINTS": "PORT",
++                       "MATCHES": "INNER_SRC_MAC,INNER_DST_MAC,SRC_MAC,ETHER_TYPE"},
++    }
++
++    @pytest.fixture(scope="class")
++    def acl_loader(self):
++        yield AclLoader()
++
++    @pytest.fixture
++    def l2_acl_loader(self, acl_loader):
++        acl_loader.rules_info = {}
++        with mock.patch.dict(acl_loader.tables_db_info, self.L2_TABLES), \
++                mock.patch.dict(acl_loader.tables_type_info, self.L2_TABLE_TYPES), \
++                mock.patch("acl_loader.main.error") as error:
++            acl_loader.load_rules_from_file(os.path.join(test_path, 'acl_input/acl_l2.json'))
++            yield acl_loader, [str(c.args[0]) for c in error.call_args_list]
++
++    def test_source_mac(self, l2_acl_loader):
++        acl_loader, _ = l2_acl_loader
++        assert acl_loader.rules_info[("L2ACL", "RULE_1")] == {
++            "SRC_MAC": "02:16:90:00:00:01",
++            "PACKET_ACTION": "FORWARD",
++            "PRIORITY": "9999"
++        }
++
++    def test_source_mac_with_ethertype(self, l2_acl_loader):
++        # The rule from kamelnetworks/sonic-buildimage#175: it became ETHER_TYPE only
++        acl_loader, _ = l2_acl_loader
++        assert acl_loader.rules_info[("L2ACL", "RULE_2")] == {
++            "SRC_MAC": "02:16:90:00:00:01",
++            "ETHER_TYPE": 34997,
++            "PACKET_ACTION": "FORWARD",
++            "PRIORITY": "9998"
++        }
++
++    def test_source_mac_mask(self, l2_acl_loader):
++        acl_loader, _ = l2_acl_loader
++        assert acl_loader.rules_info[("L2ACL", "RULE_3")] == {
++            "SRC_MAC": "00:00:00:00:00:00/00:00:00:00:00:00",
++            "PACKET_ACTION": "FORWARD",
++            "PRIORITY": "9997"
++        }
++
++    def test_destination_mac_mask_with_vlan(self, l2_acl_loader):
++        acl_loader, _ = l2_acl_loader
++        assert acl_loader.rules_info[("L2ACL", "RULE_4")] == {
++            "DST_MAC": "02:16:90:00:00:00/ff:ff:ff:00:00:00",
++            "VLAN_ID": 902,
++            "PACKET_ACTION": "FORWARD",
++            "PRIORITY": "9996"
++        }
++
++    def test_source_and_destination_mac(self, l2_acl_loader):
++        acl_loader, _ = l2_acl_loader
++        assert acl_loader.rules_info[("L2ACL", "RULE_5")] == {
++            "SRC_MAC": "52:54:00:9A:39:5C",
++            "DST_MAC": "02:00:00:17:30:01",
++            "PACKET_ACTION": "FORWARD",
++            "PRIORITY": "9995"
++        }
++
++    def test_mask_without_mac_is_rejected(self, l2_acl_loader):
++        acl_loader, errors = l2_acl_loader
++        assert ("L2ACL", "RULE_6") not in acl_loader.rules_info
++        assert ("L2ACL", "RULE_7") not in acl_loader.rules_info
++        assert any("source-mac-mask given without source-mac; table L2ACL rule 6" in e for e in errors)
++        assert any("destination-mac-mask given without destination-mac; table L2ACL rule 7" in e for e in errors)
++
++    def test_no_default_deny_rule_in_l2_table(self, l2_acl_loader):
++        acl_loader, _ = l2_acl_loader
++        assert ("L2ACL", "DEFAULT_RULE") not in acl_loader.rules_info
++
++    def test_custom_table_type_with_src_mac(self, l2_acl_loader):
++        acl_loader, errors = l2_acl_loader
++        assert acl_loader.rules_info[("L2ACL_CUSTOM", "RULE_1")] == {
++            "SRC_MAC": "02:16:90:00:00:01",
++            "PACKET_ACTION": "FORWARD",
++            "PRIORITY": "9999"
++        }
++        # DST_MAC is not in the type's MATCHES (INNER_DST_MAC must not count)
++        assert ("L2ACL_CUSTOM", "RULE_2") not in acl_loader.rules_info
++        assert any("destination-mac (DST_MAC) is not supported in table L2ACL_CUSTOM" in e for e in errors)
++
++    def test_mac_in_l3_table_is_rejected(self, l2_acl_loader):
++        # sonic-acl.yang allows SRC_MAC/DST_MAC only in L2 tables: fail
++        # instead of installing the rule without the MAC match
++        acl_loader, errors = l2_acl_loader
++        assert ("DATAACL", "RULE_1") not in acl_loader.rules_info
++        assert any("source-mac (SRC_MAC) is not supported in table DATAACL of type L3" in e for e in errors)
++
++    def test_unconverted_l2_field_is_rejected(self, acl_loader):
++        # A set l2 leaf that convert_l2() does not convert fails the rule
++        acl_loader.rules_info = {}
++        with mock.patch.dict(acl_loader.tables_db_info, self.L2_TABLES), \
++                mock.patch.object(AclLoader, "l2_converted_fields", {"ethertype", "vlan_id"}), \
++                mock.patch("acl_loader.main.error") as error:
++            acl_loader.load_rules_from_file(os.path.join(test_path, 'acl_input/acl_l2.json'))
++            errors = [str(c.args[0]) for c in error.call_args_list]
++        assert not [key for key in acl_loader.rules_info if key[0] == "L2ACL"]
++        assert any("l2 field source-mac is not supported by acl-loader" in e for e in errors)
