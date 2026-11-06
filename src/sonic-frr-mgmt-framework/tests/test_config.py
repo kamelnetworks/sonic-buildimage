@@ -529,3 +529,64 @@ def test_bgp_confederation_template():
         BGP_GLOBALS={'default': {'local_asn': '65100'}}
     )
     assert 'bgp confederation' not in result
+
+
+def _render_route_map(**tables):
+    from jinja2 import Environment, FileSystemLoader
+    import os
+    template_dir = os.path.join(os.path.dirname(__file__), '..', 'templates', 'bgpd')
+    env = Environment(loader=FileSystemLoader(template_dir))
+    return env.get_template('bgpd.conf.db.route_map.j2').render(**tables)
+
+
+def test_route_map_template_set_local_pref():
+    """#178: the startup template must render ROUTE_MAP.set_local_pref (the
+    YANG/frrcfgd field name), not the non-existent set_local_preference."""
+    result = _render_route_map(ROUTE_MAP={('RM_IN', '10'): {'route_operation': 'permit',
+                                                            'set_local_pref': '200'}})
+    assert 'route-map RM_IN permit 10' in result
+    assert ' set local-preference 200' in result
+
+
+def test_route_map_template_match_ipv6_prefix_set():
+    """#178: ROUTE_MAP.match_ipv6_prefix_set must render a match clause, else
+    the entry has no match and permits everything."""
+    pfx_sets = {'PL_V4': {'mode': 'IPv4'}, 'PL_V6': {'mode': 'IPv6'}}
+    result = _render_route_map(PREFIX_SET=pfx_sets,
+                               ROUTE_MAP={('RM_IN', '10'): {'route_operation': 'permit',
+                                                            'match_ipv6_prefix_set': 'PL_V6'}})
+    assert ' match ipv6 address prefix-list PL_V6' in result
+
+    # Both leaves on one entry render both clauses.
+    result = _render_route_map(PREFIX_SET=pfx_sets,
+                               ROUTE_MAP={('RM_IN', '10'): {'route_operation': 'permit',
+                                                            'match_prefix_set': 'PL_V4',
+                                                            'match_ipv6_prefix_set': 'PL_V6'}})
+    assert ' match ip address prefix-list PL_V4' in result
+    assert ' match ipv6 address prefix-list PL_V6' in result
+
+
+@patch.dict('sys.modules', **mockmapping)
+@patch('frrcfgd.frrcfgd.g_run_command')
+def test_route_map_match_ipv6_prefix_set_runtime(run_cmd):
+    """#178: a live ROUTE_MAP update with match_ipv6_prefix_set must program
+    'match ipv6 address prefix-list', and its delete must remove it."""
+    from frrcfgd.frrcfgd import BGPConfigDaemon, CachedDataWithOp
+    run_cmd.return_value = True
+    daemon = BGPConfigDaemon()
+    daemon.route_map = {'RM_IN': {'10': 'permit'}}
+
+    def last_cmds():
+        cmds = []
+        for call in run_cmd.call_args_list:
+            assert call[0][0] == 'ROUTE_MAP'
+            cmds.append(call[0][1])
+        return cmds
+
+    for op, prefix in ((CachedDataWithOp.OP_ADD, ''), (CachedDataWithOp.OP_DELETE, 'no ')):
+        run_cmd.reset_mock()
+        daemon.bgp_message.put(('RM_IN|10', False, 'ROUTE_MAP',
+                                {'match_ipv6_prefix_set': CachedDataWithOp('PL_V6', op)}))
+        daemon._BGPConfigDaemon__update_bgp([])
+        assert last_cmds() == [['vtysh', '-c', 'configure terminal', '-c', 'route-map RM_IN permit 10',
+                                '-c', '{}match ipv6 address prefix-list PL_V6'.format(prefix)]]
