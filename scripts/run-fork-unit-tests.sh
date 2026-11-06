@@ -30,6 +30,7 @@ ROOT=$PWD
 SUBMODULES=(
     src/sonic-platform-common
     src/sonic-platform-daemons
+    src/sonic-utilities
 )
 PYPATH=(
     src/sonic-platform-common
