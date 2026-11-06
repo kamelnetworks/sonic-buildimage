@@ -102,7 +102,7 @@ route-map {{rm_key[0]}} {{rm_val['route_operation']}} {{rm_key[1]}}
  set extcommunity rt{{ec_ns.rt_str}}
 {% endif %}
 {% if ec_ns.soo_str != '' %}
- set extcommunity soo{{ec_ns.rt_str}}
+ set extcommunity soo{{ec_ns.soo_str}}
 {% endif %}
 {% endif %}
 {# ---------------set extcommunity - End----------------------- #}
@@ -147,6 +147,9 @@ route-map {{rm_key[0]}} {{rm_val['route_operation']}} {{rm_key[1]}}
 {# ---------------set metric and med - End--------------------- #}
 {% if 'set_origin' in rm_val %}
  set origin {{rm_val['set_origin']|lower}}
+{% endif %}
+{% if 'set_tag' in rm_val %}
+ set tag {{rm_val['set_tag']}}
 {% endif %}
 {% endif %}
 {% endfor %}

@@ -1950,6 +1950,7 @@ class BGPConfigDaemon:
                          ('set_ipv6_next_hop_prefer_global', '[bgpd]{no:no-prefix}set ipv6 next-hop prefer-global', ['true', 'false']),
                          (['set_metric_action', '+set_metric', '+set_med'], '{}set metric {} ', handle_rmap_set_metric),
                          ('set_med',                        '{no:no-prefix}set metric {}'),
+                         ('set_tag',                        '{no:no-prefix}set tag {}'),
                          (('set_asn', '+set_repeat_asn'),   '[bgpd]{no:no-prefix}set as-path prepend {:repeat}', hdl_set_asn),
                          ('set_asn_list',                   '[bgpd]{no:no-prefix}set as-path prepend {:asn_list}', hdl_set_asn_list),
                          ('set_community_inline',           '[bgpd]{no:no-prefix}set community {}'),
