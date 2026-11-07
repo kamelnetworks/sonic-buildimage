@@ -72,7 +72,6 @@ class Fan(FanBase):
             self.fru = IpmiFru(self.PSU_FRU_MAPPING[self.fanindex])
             self.max_speed_offset = PSU_FAN_MAX_SPEED_OFFSET
             self.fan_direction_offset = PSU_FAN_DIRECTION_OFFSET
-            self.psu_fan_direction = None
         self.max_speed = 0
 
     def get_name(self):
@@ -157,17 +156,11 @@ class Fan(FanBase):
         direction = [self.FAN_DIRECTION_EXHAUST, self.FAN_DIRECTION_INTAKE]
         fan_status = self.get_presence()
         if not fan_status:
-            if self.is_psu_fan:
-                # A different PSU may be plugged in next.
-                self.psu_fan_direction = None
             return self.FAN_DIRECTION_NOT_APPLICABLE
         if self.is_psu_fan:
-            # `ipmitool fru print` takes about a second over KCS and
-            # thermalctld polls every fan every minute, so read the PSU's
-            # airflow once while it stays present.
-            if self.psu_fan_direction is None:
-                self.psu_fan_direction = self._get_psu_fan_direction()
-            return self.psu_fan_direction or self.FAN_DIRECTION_NOT_APPLICABLE
+            # A PSU can be replaced between presence polls. Re-read its
+            # product instead of latching a direction (or N/A) indefinitely.
+            return self._get_psu_fan_direction() or self.FAN_DIRECTION_NOT_APPLICABLE
         is_valid, fan_direction = self.fru.get_fru_data(self.fan_direction_offset)
         if is_valid and fan_direction[0] < len(direction):
             return direction[fan_direction[0]]

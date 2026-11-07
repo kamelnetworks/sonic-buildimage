@@ -178,21 +178,30 @@ class FanDirectionTest(unittest.TestCase):
         self.assertEqual(fan.get_direction(), 'N/A')
         self.assertNotIn('fru print 1', self.ipmitool.calls)
 
-    def test_psu_fan_direction_is_read_once_while_present(self):
-        """ipmitool fru print costs about a second over KCS per call, and
-        thermalctld polls every minute: read it once, again after a swap."""
+    def test_psu_fan_direction_refreshes_after_missed_removal(self):
         self.use_ipmitool(psu_responses())
         fan = self.psu_fan()
         self.assertEqual(fan.get_direction(), 'intake')
-        self.assertEqual(fan.get_direction(), 'intake')
-        self.assertEqual(self.ipmitool.calls.count('fru print 1'), 1)
-        # PSU pulled: direction is N/A and the cache is dropped.
-        self.ipmitool.responses.update(psu_responses(present=False))
-        self.assertEqual(fan.get_direction(), 'N/A')
-        # A normal-airflow PSU is plugged in.
+        # Removed and replaced between polls: no absent observation.
         self.ipmitool.responses.update(psu_responses(PSU_FRU_PRINT.replace('PS/IO', 'IO/PS')))
         self.assertEqual(fan.get_direction(), 'exhaust')
         self.assertEqual(self.ipmitool.calls.count('fru print 1'), 2)
+
+    def test_unknown_product_recovers_without_absence(self):
+        self.use_ipmitool(psu_responses(PSU_FRU_PRINT.replace('PS/IO', 'UNKNOWN')))
+        fan = self.psu_fan()
+        self.assertEqual(fan.get_direction(), 'N/A')
+        self.ipmitool.responses.update(psu_responses())
+        self.assertEqual(fan.get_direction(), 'intake')
+
+    def test_psu_direction_after_observed_removal(self):
+        self.use_ipmitool(psu_responses())
+        fan = self.psu_fan()
+        self.assertEqual(fan.get_direction(), 'intake')
+        self.ipmitool.responses.update(psu_responses(present=False))
+        self.assertEqual(fan.get_direction(), 'N/A')
+        self.ipmitool.responses.update(psu_responses(PSU_FRU_PRINT.replace('PS/IO', 'IO/PS')))
+        self.assertEqual(fan.get_direction(), 'exhaust')
 
     def test_psu_fan_unreadable_fru_is_retried(self):
         responses = psu_responses()
