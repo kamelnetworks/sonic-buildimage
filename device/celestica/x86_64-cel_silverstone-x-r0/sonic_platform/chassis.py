@@ -124,6 +124,14 @@ class Chassis(ChassisBase):
         """
         return self._eeprom.get_serial()
 
+    def get_revision(self):
+        """
+        Retrieves the hardware revision for the chassis
+        Returns:
+            A string containing the hardware revision for this chassis.
+        """
+        return self._eeprom.get_revision()
+
     def get_system_eeprom_info(self):
         """
         Retrieves the full content of system EEPROM information for the chassis
