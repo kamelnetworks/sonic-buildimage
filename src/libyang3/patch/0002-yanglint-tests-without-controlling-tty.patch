@@ -1,0 +1,113 @@
+Make the yanglint tcltest suites run without a controlling terminal
+
+SONiC recipes run with stdin from /dev/null and stdout piped to a log.
+Registering expect_after before spawn binds its EOF handler to stdin/stdout,
+which closes stdout when stdin reaches EOF. Bind the handlers to any_spawn_id
+instead. Keep -i inside the single braced argument: putting it outside makes
+Expect treat the entire block as one pattern, silently disabling EOF/timeout
+errors. Regression tests exercise both errors against a real yanglint process.
+
+Set stty_init to give the spawned PTY a width without a controlling terminal;
+otherwise yanglint waits for a cursor-position reply rather than a command.
+Propagate tcltest::runAllTests' failure return so file-level errors fail CTest
+as well as ordinary failed tests.
+
+kamelnetworks/sonic-buildimage#50
+
+diff --git a/tests/tool_i.tcl b/tests/tool_i.tcl
+--- a/tests/tool_i.tcl
++++ b/tests/tool_i.tcl
+@@ -30,7 +30,12 @@
+ set error_head "$error_prompt Check-failed"
+ 
+ # detection on eof and timeout will be on every expect command
++# Bind the patterns to the spawn ids of the expect command being executed,
++# not to the spawn id current at this point (the user's stdin/stdout).
++# Otherwise an EOF on stdin, as when the tests run with stdin redirected
++# from /dev/null, matches immediately and also closes stdout.
+ expect_after {
++    -i $any_spawn_id
+     eof {
+         global error_head
+         error "$error_head unexpected termination"
+diff --git a/tests/yanglint/interactive/all.tcl b/tests/yanglint/interactive/all.tcl
+--- a/tests/yanglint/interactive/all.tcl
++++ b/tests/yanglint/interactive/all.tcl
+@@ -11,5 +11,10 @@
+     tcltest::configure -testdir "$env(TESTS_DIR)/interactive"
+ }
+ 
+-tcltest::runAllTests
++set rc [tcltest::runAllTests]
++# runAllTests returns true if a test file failed to run at all (for example
++# an error outside of a test); such files are not counted in numTests.
++if {$rc ne "" && $rc} {
++    set exitCode 1
++}
+ exit $exitCode
+diff --git a/tests/yanglint/interactive/ly.tcl b/tests/yanglint/interactive/ly.tcl
+--- a/tests/yanglint/interactive/ly.tcl
++++ b/tests/yanglint/interactive/ly.tcl
+@@ -13,8 +13,12 @@
+ set prompt "> "
+ # turn off dialog between expect and yanglint
+ log_user 0
+-# setting some large terminal width
+-stty columns 720
++# setting some large terminal width for the spawned pty
++# (stty_init is applied by spawn to the new pty itself, so it works without
++# a controlling terminal; "stty columns" would only change the controlling
++# terminal and leave the pty with 0 columns, which makes yanglint query the
++# cursor position and wait forever for an answer)
++set stty_init "columns 720"
+ 
+ # default setup for every unit test
+ variable ly_setup {
+diff --git a/tests/yanglint/interactive/harness.test b/tests/yanglint/interactive/harness.test
+--- /dev/null
++++ b/tests/yanglint/interactive/harness.test
+@@ -0,0 +1,29 @@
++source [expr {[info exists ::env(TESTS_DIR)] ? "$env(TESTS_DIR)/interactive/ly.tcl" : "ly.tcl"}]
++
++test harness_eof {unexpected tool termination must fail an expect} -setup {
++    spawn $TUT
++    ly_skip_warnings
++} -body {
++    send "exit\r"
++    set rc [catch {expect -exact "never produced" {}} message]
++    list $rc [string match "*unexpected termination" $message]
++} -cleanup {
++    catch {close}
++    catch {wait}
++} -result {1 1}
++
++test harness_timeout {missing output must fail an expect} -setup {
++    spawn $TUT
++    ly_skip_warnings
++    set saved_timeout $timeout
++    set timeout 1
++} -body {
++    set rc [catch {expect -exact "never produced" {}} message]
++    list $rc [string match "*timeout" $message]
++} -cleanup {
++    set timeout $saved_timeout
++    catch {close}
++    catch {wait}
++} -result {1 1}
++
++cleanupTests
+diff --git a/tests/yanglint/non-interactive/all.tcl b/tests/yanglint/non-interactive/all.tcl
+--- a/tests/yanglint/non-interactive/all.tcl
++++ b/tests/yanglint/non-interactive/all.tcl
+@@ -11,5 +11,10 @@
+     tcltest::configure -testdir "$env(TESTS_DIR)/non-interactive"
+ }
+ 
+-tcltest::runAllTests
++set rc [tcltest::runAllTests]
++# runAllTests returns true if a test file failed to run at all (for example
++# an error outside of a test); such files are not counted in numTests.
++if {$rc ne "" && $rc} {
++    set exitCode 1
++}
+ exit $exitCode
