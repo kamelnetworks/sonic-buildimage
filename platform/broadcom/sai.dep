@@ -1,2 +1,1 @@
 include $(PLATFORM_PATH)/sai-xgs.dep
-include $(PLATFORM_PATH)/sai-dnx.dep

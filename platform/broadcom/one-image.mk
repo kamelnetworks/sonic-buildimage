@@ -2,7 +2,14 @@
 
 SONIC_ONE_IMAGE = sonic-broadcom.bin
 $(SONIC_ONE_IMAGE)_MACHINE = broadcom
-$(SONIC_ONE_IMAGE)_DEPENDENT_MACHINE = broadcom-dnx broadcom-legacy-th
+# Upstream also assembles the broadcom-dnx and broadcom-legacy-th variants
+# (DEPENDENT_MACHINE) into this installer: three root filesystems, three
+# docker sets and three ONIE payloads per build. The fork's 202611 platforms
+# (Dell S5232F-ON, Celestica Seastone 2; both device/*/platform_asic =
+# broadcom) only use the plain variant, so only that one is built (#56,
+# decision by @bluecmd). The variant-specific packages stay defined for
+# `make target/...` but are no longer prerequisites of the image.
+$(SONIC_ONE_IMAGE)_DEPENDENT_MACHINE =
 $(SONIC_ONE_IMAGE)_IMAGE_TYPE = onie
 $(SONIC_ONE_IMAGE)_INSTALLS += $(PDDF_PLATFORM_MODULE)
 $(SONIC_ONE_IMAGE)_INSTALLS += $(SYSTEMD_SONIC_GENERATOR)
@@ -150,7 +157,7 @@ ifeq ($(INSTALL_ARISTA_FIRMWARE),y)
 $(SONIC_ONE_IMAGE)_LAZY_INSTALLS += $(ARISTA_FIRMWARE)
 endif
 
-$(SONIC_ONE_IMAGE)_LAZY_BUILD_INSTALLS = $(BRCM_OPENNSL_KERNEL) $(BRCM_DNX_OPENNSL_KERNEL)
+$(SONIC_ONE_IMAGE)_LAZY_BUILD_INSTALLS = $(BRCM_OPENNSL_KERNEL)
 ifeq ($(INSTALL_DEBUG_TOOLS),y)
 $(SONIC_ONE_IMAGE)_DOCKERS += $(SONIC_INSTALL_DOCKER_DBG_IMAGES)
 $(SONIC_ONE_IMAGE)_DOCKERS += $(filter-out $(patsubst %-$(DBG_IMAGE_MARK).gz,%.gz, $(SONIC_INSTALL_DOCKER_DBG_IMAGES)), $(SONIC_INSTALL_DOCKER_IMAGES))

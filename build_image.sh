@@ -136,6 +136,15 @@ generate_device_list()
     if [ "$TARGET_MACHINE" = "alpinevs" ] ; then
       echo "x86_64-kvm_x86_64-r0" >> "$platforms_asic";
     fi
+
+    # device/virtual/x86_64-kvm_x86_64-r0/platform_asic is git-ignored and only
+    # written by the sonic-device-data build (src/sonic-device-data/Makefile), so
+    # it is missing when that package was restored from the DPKG cache. Add the
+    # virtual platform explicitly for the vs/vpp machines, so a cached build
+    # gives the same platform list as a clean build (#56).
+    if [ "$TARGET_MACHINE" = "vs" ] || [ "$TARGET_MACHINE" = "vpp" ]; then
+      grep -Fxq "x86_64-kvm_x86_64-r0" "$platforms_asic" || echo "x86_64-kvm_x86_64-r0" >> "$platforms_asic"
+    fi
 }
 
 if [ "$IMAGE_TYPE" = "onie" ]; then
