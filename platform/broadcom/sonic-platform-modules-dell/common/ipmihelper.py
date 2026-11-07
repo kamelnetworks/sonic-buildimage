@@ -10,6 +10,7 @@
 
 import subprocess
 import re
+import time
 
 # IPMI Request Network Function Codes
 NetFn_SensorEvent = 0x04
@@ -23,14 +24,82 @@ Cmd_GetSensorReading = 0x2D
 # IPMI FRU Device Commands
 Cmd_ReadFRUData = 0x11
 
-def get_ipmitool_raw_output(args):
+# ipmitool reply cache (kamelnetworks/sonic-buildimage#163)
+#
+# Every sensor attribute is an `ipmitool` subprocess, one BMC round trip
+# over KCS takes 0.3-0.8 s, and a reading costs two of them (Get Sensor
+# Reading plus Get Sensor Reading Factors). thermalctld asks the same
+# question several times per cycle (a fan's presence and speed, a thermal's
+# thresholds), psud polls every 3 s, and a thermalctld cycle on the S5232F
+# took over 30 s.
+#
+# Read-only ipmitool commands are therefore answered from this per-process
+# cache: sensor readings for a few seconds, and the data that is constant
+# for a sensor or an inserted unit (reading factors for a raw value,
+# thresholds, FRU records) for longer. Anything else is never cached and
+# drops the cache, so a read after a write sees the new state. A failed
+# command is cached only for the short time, so it is retried soon.
+CACHE_TTL_READ = 10
+CACHE_TTL_STATIC = 300
+CACHE_TTLS = {
+    (NetFn_SensorEvent, Cmd_GetSensorReading): CACHE_TTL_READ,
+    (NetFn_SensorEvent, Cmd_GetSensorReadingFactors): CACHE_TTL_STATIC,
+    (NetFn_SensorEvent, Cmd_GetSensorThreshold): CACHE_TTL_STATIC,
+    (NetFn_Storage, Cmd_ReadFRUData): CACHE_TTL_STATIC,
+}
+_cache = {}
+
+
+def clear_cache():
+    """Forgets every cached ipmitool reply."""
+    _cache.clear()
+
+
+def _cached(key, ttl, run):
     """
-    Returns a list the elements of which are the individual bytes of
-    ipmitool raw <cmd> command output.
+    Returns the cached reply for key if it is still valid, else run()'s,
+    which is cached for ttl seconds (CACHE_TTL_READ if it is empty, i.e.
+    the command failed). ttl None means: not cacheable, and whatever is
+    cached may describe the state before this command; ttl 0 means the
+    cache is off.
     """
-    result_bytes = list()
+    if ttl is None:
+        _cache.clear()
+    if not ttl:
+        return run()
+
+    now = time.monotonic()
+    entry = _cache.get(key)
+    if entry is not None and entry[0] > now:
+        return entry[1]
+
+    result = run()
+    if not result:
+        ttl = min(ttl, CACHE_TTL_READ)
+    _cache[key] = (now + ttl, result)
+    return result
+
+
+def _raw_command_key(args):
+    """
+    Returns the cache key for the arguments of an `ipmitool raw` command
+    (its bytes, normalised to integers) and the TTL for its reply.
+    """
+    try:
+        words = tuple(int(word, 0) for word in args.split())
+    except ValueError:
+        return args, None
+    if len(words) < 2:
+        return words, None
+    return words, CACHE_TTLS.get(words[:2])
+
+
+def _run_ipmitool(command):
+    """
+    Runs an ipmitool command line and returns its output, or '' if it
+    failed.
+    """
     result = ""
-    command = "ipmitool raw {}".format(args)
     try:
         proc = subprocess.Popen(command.split(), stdout=subprocess.PIPE,
                                 universal_newlines=True, stderr=subprocess.STDOUT)
@@ -41,6 +110,18 @@ def get_ipmitool_raw_output(args):
     except EnvironmentError:
         pass
 
+    return result
+
+
+def get_ipmitool_raw_output(args):
+    """
+    Returns a list the elements of which are the individual bytes of
+    ipmitool raw <cmd> command output.
+    """
+    key, ttl = _raw_command_key(args)
+    result = _cached(key, ttl, lambda: _run_ipmitool("ipmitool raw {}".format(args)))
+
+    result_bytes = list()
     for i in result.split():
         result_bytes.append(int(i, 16))
 
@@ -174,19 +255,9 @@ class IpmiFru(object):
         self.id = fru_id
 
     def _get_ipmitool_fru_print(self):
-        result = ""
         command = "ipmitool fru print {}".format(self.id)
-        try:
-            proc = subprocess.Popen(command.split(), stdout=subprocess.PIPE,
-                                    universal_newlines=True, stderr=subprocess.STDOUT)
-            stdout = proc.communicate()[0]
-            proc.wait()
-            if not proc.returncode:
-                result = stdout.rstrip('\n')
-        except EnvironmentError:
-            pass
-
-        return result
+        return _cached(('fru', int(self.id)), CACHE_TTL_STATIC,
+                       lambda: _run_ipmitool(command))
 
     def _get_from_fru(self, info):
         """
@@ -240,26 +311,16 @@ class IpmiFru(object):
             FRU data read.
         """
         result_bytes = list()
-        is_valid = True
-        result = ""
 
         offset_LSB = offset & 0xFF
         offset_MSB = offset & 0xFF00
-        command = "ipmitool raw {} {} {} {} {} {}".format(NetFn_Storage,
-                                                          Cmd_ReadFRUData,
-                                                          self.id, offset_LSB,
-                                                          offset_MSB, count)
-        try:
-            proc = subprocess.Popen(command.split(), stdout=subprocess.PIPE,
-                                    universal_newlines=True, stderr=subprocess.STDOUT)
-            stdout = proc.communicate()[0]
-            proc.wait()
-            if not proc.returncode:
-                result = stdout.rstrip('\n')
-        except EnvironmentError:
-            is_valid = False
+        args = "{} {} {} {} {} {}".format(NetFn_Storage, Cmd_ReadFRUData,
+                                          self.id, offset_LSB, offset_MSB,
+                                          count)
+        key, ttl = _raw_command_key(args)
+        result = _cached(key, ttl, lambda: _run_ipmitool("ipmitool raw {}".format(args)))
 
-        if (not result) or (not is_valid):
+        if not result:
             return False, result_bytes
 
         for i in result.split():
