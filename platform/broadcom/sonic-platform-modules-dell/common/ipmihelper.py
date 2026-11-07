@@ -33,26 +33,38 @@ Cmd_ReadFRUData = 0x11
 # thresholds), psud polls every 3 s, and a thermalctld cycle on the S5232F
 # took over 30 s.
 #
-# Read-only ipmitool commands are therefore answered from this per-process
-# cache: sensor readings for a few seconds, and the data that is constant
-# for a sensor or an inserted unit (reading factors for a raw value,
-# thresholds, FRU records) for longer. Anything else is never cached and
-# drops the cache, so a read after a write sees the new state. A failed
-# command is cached only for the short time, so it is retried soon.
-CACHE_TTL_READ = 10
+# Duplicate readings and FRU replies expire within psud's existing 3-second
+# polling interval. FRU data determines airflow and must not survive a missed
+# replacement indefinitely. Sensor factors/thresholds describe BMC sensors and
+# retain their longer TTL. Writes invalidate only this process's cache.
+CACHE_TTL_READ = 3
 CACHE_TTL_STATIC = 300
 CACHE_TTLS = {
     (NetFn_SensorEvent, Cmd_GetSensorReading): CACHE_TTL_READ,
     (NetFn_SensorEvent, Cmd_GetSensorReadingFactors): CACHE_TTL_STATIC,
     (NetFn_SensorEvent, Cmd_GetSensorThreshold): CACHE_TTL_STATIC,
-    (NetFn_Storage, Cmd_ReadFRUData): CACHE_TTL_STATIC,
+    (NetFn_Storage, Cmd_ReadFRUData): CACHE_TTL_READ,
 }
 _cache = {}
+_discrete_states = {}
 
 
 def clear_cache():
     """Forgets every cached ipmitool reply."""
     _cache.clear()
+    _discrete_states.clear()
+
+
+def _observe_discrete(sensor_id, state):
+    # A presence/status transition can mean a replacement. Drop all FRU
+    # replies because this shared helper has no platform-specific FRU map.
+    previous = _discrete_states.get(sensor_id)
+    if previous is not None and previous != state:
+        for key in list(_cache):
+            if isinstance(key, tuple) and (key[0] == 'fru' or
+                    key[:2] == (NetFn_Storage, Cmd_ReadFRUData)):
+                del _cache[key]
+    _discrete_states[sensor_id] = state
 
 
 def _cached(key, ttl, run):
@@ -192,6 +204,8 @@ class IpmiSensor(object):
         cmd_args = "{} {} {}".format(NetFn_SensorEvent, Cmd_GetSensorReading,
                                      self.id)
         output = get_ipmitool_raw_output(cmd_args)
+        if self.is_discrete:
+            _observe_discrete(self.id, tuple(output))
         if len(output) != 4:
             return False, 0
 
@@ -256,7 +270,8 @@ class IpmiFru(object):
 
     def _get_ipmitool_fru_print(self):
         command = "ipmitool fru print {}".format(self.id)
-        return _cached(('fru', int(self.id)), CACHE_TTL_STATIC,
+        return _cached(('fru', int(self.id)),
+                       CACHE_TTLS.get((NetFn_Storage, Cmd_ReadFRUData), 0),
                        lambda: _run_ipmitool(command))
 
     def _get_from_fru(self, info):
@@ -313,7 +328,7 @@ class IpmiFru(object):
         result_bytes = list()
 
         offset_LSB = offset & 0xFF
-        offset_MSB = offset & 0xFF00
+        offset_MSB = (offset >> 8) & 0xFF
         args = "{} {} {} {} {} {}".format(NetFn_Storage, Cmd_ReadFRUData,
                                           self.id, offset_LSB, offset_MSB,
                                           count)

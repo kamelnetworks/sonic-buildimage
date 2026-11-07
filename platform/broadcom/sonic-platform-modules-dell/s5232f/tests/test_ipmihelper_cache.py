@@ -47,10 +47,11 @@ def load_platform():
         spec.loader.exec_module(ipmihelper)
         import sonic_platform.fan
         import sonic_platform.thermal
-        return ipmihelper, sonic_platform.fan, sonic_platform.thermal
+        import sonic_platform.psu
+        return ipmihelper, sonic_platform.fan, sonic_platform.thermal, sonic_platform.psu
 
 
-ipmihelper, fan_module, thermal_module = load_platform()
+ipmihelper, fan_module, thermal_module, psu_module = load_platform()
 
 
 class FakeProc:
@@ -181,25 +182,61 @@ class CacheTest(unittest.TestCase):
         self.assertEqual(sensor.get_threshold('UpperNonCritical'), (True, 78))
         self.assertEqual(self.ipmitool.calls.count('raw 4 39 1'), 2)
 
-    def test_fru_print_is_static(self):
+    def test_fru_inventory_refreshes_next_poll(self):
         self.use_ipmitool({'fru print 3': FAN_FRU_PRINT})
         fru = ipmihelper.IpmiFru(3)
-        for _ in range(3):
-            self.assertEqual(fru.get_board_serial(), 'CN07R5RFCES0094D0105')
-            self.assertEqual(fru.get_board_part_number(), '07R5RFA00')
-            self.clock.advance(60)
-        self.assertEqual(self.ipmitool.calls, ['fru print 3'])
-        self.clock.advance(ipmihelper.CACHE_TTL_STATIC)
         self.assertEqual(fru.get_board_serial(), 'CN07R5RFCES0094D0105')
-        self.assertEqual(self.ipmitool.calls, ['fru print 3', 'fru print 3'])
+        self.assertEqual(fru.get_board_part_number(), '07R5RFA00')
+        self.assertEqual(self.ipmitool.calls, ['fru print 3'])
+        self.ipmitool.responses['fru print 3'] = FAN_FRU_PRINT.replace('CN07R5RFCES0094D0105', 'NEW_SERIAL')
+        self.clock.advance(3)
+        self.assertEqual(fru.get_board_serial(), 'NEW_SERIAL')
 
-    def test_fru_data_is_static(self):
-        self.use_ipmitool({'raw 10 17 3 71 0 2': ' 02 10 27'})
+    def test_fru_data_refreshes_next_poll(self):
+        self.use_ipmitool({'raw 10 17 3 69 0 1': ' 01 01'})
         fru = ipmihelper.IpmiFru(3)
-        self.assertEqual(fru.get_fru_data(71, 2), (True, [0x10, 0x27]))
-        self.clock.advance(ipmihelper.CACHE_TTL_READ + 1)
-        self.assertEqual(fru.get_fru_data(71, 2), (True, [0x10, 0x27]))
-        self.assertEqual(self.ipmitool.calls, ['raw 10 17 3 71 0 2'])
+        self.assertEqual(fru.get_fru_data(69), (True, [1]))
+        self.ipmitool.responses['raw 10 17 3 69 0 1'] = ' 01 00'
+        self.clock.advance(3)
+        self.assertEqual(fru.get_fru_data(69), (True, [0]))
+
+    def test_fru_offset_has_two_byte_encoding(self):
+        self.use_ipmitool({'raw 10 17 3 35 1 1': ' 01 ab'})
+        self.assertEqual(ipmihelper.IpmiFru(3).get_fru_data(0x123), (True, [0xab]))
+        self.assertEqual(self.ipmitool.calls, ['raw 10 17 3 35 1 1'])
+
+    def test_cache_enabled_psu_swap_without_absence_and_recovery(self):
+        self.use_ipmitool({'raw 4 45 49': ' 00 c0 01 80',
+                          'fru print 1': 'Board Product : PWR SPLY,PS/IO,DELTA'})
+        fan = psu_module.Psu(0).get_all_fans()[0]
+        self.assertEqual(fan.get_direction(), 'intake')
+        self.ipmitool.responses['fru print 1'] = 'Board Product : PWR SPLY,IO/PS,DELTA'
+        self.clock.advance(3)
+        self.assertEqual(fan.get_direction(), 'exhaust')
+        self.ipmitool.responses['fru print 1'] = 'Board Product : UNKNOWN'
+        self.clock.advance(3)
+        self.assertEqual(fan.get_direction(), 'N/A')
+        self.ipmitool.responses['fru print 1'] = 'Board Product : PWR SPLY,PS/IO,DELTA'
+        self.clock.advance(3)
+        self.assertEqual(fan.get_direction(), 'intake')
+
+    def test_observed_absence_invalidates_fru_before_its_ttl(self):
+        self.use_ipmitool({'raw 4 45 49': ' 00 c0 01 80',
+                          'fru print 1': 'Board Product : PWR SPLY,PS/IO,DELTA'})
+        psu = psu_module.Psu(0)
+        fan = psu.get_all_fans()[0]
+        self.assertTrue(psu.get_presence())
+        self.clock.advance(2)
+        self.assertEqual(fan.get_direction(), 'intake')
+        self.ipmitool.responses['raw 4 45 49'] = ' 00 c0 00 80'
+        self.clock.advance(1)
+        self.assertEqual(fan.get_direction(), 'N/A')
+        self.ipmitool.responses['fru print 1'] = 'Board Product : PWR SPLY,IO/PS,DELTA'
+        # Removal was observed at t=3; cached FRU from t=2 must be invalid.
+        self.assertEqual(fan.fru.get_board_product(), 'PWR SPLY,IO/PS,DELTA')
+        self.ipmitool.responses['raw 4 45 49'] = ' 00 c0 01 80'
+        self.clock.advance(3)
+        self.assertEqual(fan.get_direction(), 'exhaust')
 
     def test_static_ttl_outlives_a_thermalctld_cycle(self):
         self.assertGreater(ipmihelper.CACHE_TTL_STATIC, 60)
