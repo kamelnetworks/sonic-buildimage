@@ -124,6 +124,10 @@ class FanDirectionTest(unittest.TestCase):
     def use_ipmitool(self, responses):
         self.ipmitool = FakeIpmitool(responses)
         self.enterContext(patch.object(ipmihelper.subprocess, 'Popen', self.ipmitool))
+        # These tests change the replies between calls, so run them without
+        # the helper's reply cache (#163, test_ipmihelper_cache.py).
+        ipmihelper.clear_cache()
+        self.enterContext(patch.object(ipmihelper, 'CACHE_TTLS', {}))
 
     def psu_fan(self):
         psu = psu_module.Psu(0)
