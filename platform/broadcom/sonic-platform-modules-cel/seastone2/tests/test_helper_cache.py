@@ -80,9 +80,8 @@ def test_reading_expires_after_the_read_ttl(bmc):
     assert len(bmc.calls) == 2
 
 
-@pytest.mark.parametrize('cmd', (FRU_PART_CMD.format(5), "ipmitool fru print 3 | grep 'Product Name' ",
-                                 SENSOR_THRESH_CMD.format('0x01')))
-def test_fru_and_thresholds_are_static(bmc, cmd):
+@pytest.mark.parametrize('cmd', (SENSOR_THRESH_CMD.format('0x01'),))
+def test_thresholds_are_static(bmc, cmd):
     bmc.responses[cmd] = ' something'
     assert api().run_command(cmd) == (True, ' something')
     bmc.clock.advance(helper.CACHE_TTL_READ + 1)
@@ -119,7 +118,8 @@ def test_writes_are_never_cached_and_drop_the_cache(bmc):
     assert fan.drawer_set_status_led('green') is True
     bmc.responses[FAN_LED_CMD.format(fan._fan_led_offset)] = ' 02'
     assert fan.get_status_led() == 'green'
-    assert bmc.calls == [FAN_LED_CMD.format(fan._fan_led_offset), set_cmd, set_cmd,
+    assert bmc.calls == [FAN_LED_CMD.format(fan._fan_led_offset),
+                         FAN_LED_CMD.format(fan._fan_led_offset), set_cmd, set_cmd,
                          FAN_LED_CMD.format(fan._fan_led_offset)]
 
 
@@ -224,7 +224,7 @@ def test_psu_status_is_one_round_trip(bmc):
     assert bmc.calls == [PSU_STATUS_CMD.format('0x72')]
 
 
-def test_drawer_fru_is_read_once_per_static_ttl(bmc):
+def test_drawer_fru_refreshes_each_poll(bmc):
     fan = fan_module.Fan(1, 0)
     bmc.responses[FRU_PART_CMD.format(fan._fan_fru_offset)] = ' Board Part Number     : R1241-F0001-01'
     bmc.responses[FRU_SERIAL_CMD.format(fan._fan_fru_offset)] = ' Board Serial          : R1241F0001012A0021'
@@ -232,4 +232,55 @@ def test_drawer_fru_is_read_once_per_static_ttl(bmc):
         assert fan.get_model() == 'R1241-F0001-01'
         assert fan.get_serial() == 'R1241F0001012A0021'
         bmc.clock.advance(60)
-    assert len(bmc.calls) == 2
+    assert len(bmc.calls) == 6
+
+
+def test_psu_replacement_between_polls_refreshes_direction(bmc):
+    fan = fan_module.Fan(0, 0, is_psu_fan=True, psu_index=0)
+    cmd = fan_module.IPMI_GET_PSU_MODEL.format(fan_module.PSU_FRU_BASE)
+    bmc.responses[cmd] = ' Product Name : PSU B'
+    assert fan.get_direction() == 'intake'
+    bmc.responses[cmd] = ' Product Name : PSU F'
+    bmc.clock.advance(3)  # Existing psud poll interval; no sampled removal.
+    assert fan.get_direction() == 'exhaust'
+    del bmc.responses[cmd]
+    bmc.clock.advance(3)
+    assert fan.get_direction() == fan_module.NOT_AVAILABLE
+    bmc.responses[cmd] = ' Product Name : PSU B'
+    bmc.clock.advance(3)
+    assert fan.get_direction() == 'intake'
+
+
+def test_observed_removal_invalidates_newer_fru_reply(bmc):
+    presence = PRESENCE_CMD.format(0)
+    fru = FRU_PART_CMD.format(5)
+    bmc.responses[presence] = ' 00'
+    api().run_command(presence)
+    bmc.clock.advance(2)
+    bmc.responses[fru] = 'old unit'
+    api().run_command(fru)
+    bmc.clock.advance(1)
+    bmc.responses[presence] = ' 01'
+    api().run_command(presence)
+    bmc.responses[fru] = 'replacement'
+    assert api().run_command(fru) == (True, 'replacement')
+
+
+def test_external_led_write_is_visible_immediately(bmc):
+    chassis = chassis_module.Chassis.__new__(chassis_module.Chassis)
+    chassis._api_helper = api()
+    bmc.responses[SYS_LED_CMD] = ' 10'
+    assert chassis.get_status_led() == 'green'
+    # No call to this process's write API: another daemon changes the BMC.
+    bmc.responses[SYS_LED_CMD] = ' 20'
+    assert chassis.get_status_led() == 'amber'
+
+
+def test_presence_changes_visible_at_next_psud_poll(bmc):
+    psu = psu_module.Psu(0)
+    cmd = PSU_STATUS_CMD.format('0x72')
+    bmc.responses[cmd] = ' 00 c0 01 00'
+    assert psu.get_presence()
+    bmc.responses[cmd] = ' 00 c0 00 00'
+    bmc.clock.advance(3)
+    assert not psu.get_presence()

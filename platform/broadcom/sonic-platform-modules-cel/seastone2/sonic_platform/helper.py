@@ -21,30 +21,46 @@ HOST_CHK_CMD = "docker > /dev/null 2>&1"
 # thresholds twice, the fan FRU every minute) and psud polls every 3 s, so
 # the BMC was saturated and a thermalctld cycle took 45-50 s.
 #
-# Read-only ipmitool commands are therefore answered from this per-process
-# cache: sensor readings, presence, CPLD registers and LEDs for a few
-# seconds, FRU records and sensor thresholds (constant while a unit is
-# inserted) for longer. Writes are never cached and drop the cache, so a
-# read after a write sees the new state. A failed command is cached only
-# for the short time, so it is retried soon.
-CACHE_TTL_READ = 10
+# Cache duplicate reads only within psud's existing 3-second poll interval.
+# FRU data determines airflow as well as inventory: it must expire even if a
+# replacement happens between presence polls. LED reads bypass the cache so
+# changes made by another process are visible. Thresholds describe BMC sensors.
+# Writes invalidate this process's cache only, not other daemon processes.
+CACHE_TTL_READ = 3
 CACHE_TTL_STATIC = 300
 # (lower-cased command prefix, TTL)
 CACHE_TTLS = (
     ("ipmitool raw 0x04 0x2d ", CACHE_TTL_READ),         # Get Sensor Reading
     ("ipmitool raw 0x04 0x27 ", CACHE_TTL_STATIC),       # Get Sensor Threshold
     ("ipmitool raw 0x3a 0x03 0x03 ", CACHE_TTL_READ),    # fan / PSU presence
+    ("ipmitool raw 0x3a 0x0c 0x00 0x02 0x62", 0),    # system LED
     ("ipmitool raw 0x3a 0x0c 0x00 0x02 ", CACHE_TTL_READ),  # CPLD register read
-    ("ipmitool raw 0x3a 0x0b ", CACHE_TTL_READ),         # fan LED
-    ("ipmitool fru list ", CACHE_TTL_STATIC),
-    ("ipmitool fru print ", CACHE_TTL_STATIC),
+    ("ipmitool raw 0x3a 0x0b ", 0),         # fan LED
+    ("ipmitool fru list ", CACHE_TTL_READ),
+    ("ipmitool fru print ", CACHE_TTL_READ),
 )
 _cache = {}
+_presence_replies = {}
 
 
 def clear_cache():
     """Forgets every cached ipmitool reply."""
     _cache.clear()
+    _presence_replies.clear()
+
+
+def _observe_presence(key, result):
+    # These are the fan presence command and both PSU status sensors.
+    if not (key.startswith("ipmitool raw 0x3a 0x03 0x03 ") or
+            key in ("ipmitool raw 0x04 0x2d 0x72",
+                    "ipmitool raw 0x04 0x2d 0x73")):
+        return
+    previous = _presence_replies.get(key)
+    if previous is not None and previous != result:
+        for cached_key in list(_cache):
+            if cached_key.startswith("ipmitool fru "):
+                del _cache[cached_key]
+    _presence_replies[key] = result
 
 
 def _cache_key_and_ttl(cmd):
@@ -80,6 +96,7 @@ def run_ipmitool(cmd):
         return entry[1]
 
     ret, data = subprocess.getstatusoutput(cmd)
+    _observe_presence(key, (ret, data.strip()))
     if ret != 0:
         ttl = min(ttl, CACHE_TTL_READ)
     _cache[key] = (now + ttl, (ret, data))
