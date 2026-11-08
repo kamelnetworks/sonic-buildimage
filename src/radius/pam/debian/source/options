@@ -1,5 +1,0 @@
-extend-diff-ignore=aclocal\.m4
-extend-diff-ignore=configure
-extend-diff-ignore=config\.status
-extend-diff-ignore=config\.guess
-

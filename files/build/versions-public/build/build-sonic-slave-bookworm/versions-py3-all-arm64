@@ -1,4 +1,0 @@
-certifi==2026.5.20
-cffi==2.0.0
-requests==2.34.2
-urllib3==2.7.0

@@ -1,5 +1,0 @@
-# Bridge interface for midplane network
-
-[NetDev]
-Name=bridge-midplane
-Kind=bridge

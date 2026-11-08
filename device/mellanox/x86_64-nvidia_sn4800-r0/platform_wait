@@ -1,4 +1,0 @@
-#!/bin/bash
-
-declare -r EXIT_SUCCESS="0"
-exit "${EXIT_SUCCESS}"

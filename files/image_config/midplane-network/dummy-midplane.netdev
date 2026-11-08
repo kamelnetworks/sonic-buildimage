@@ -1,5 +1,0 @@
-# Dummy interface for midplane network
-
-[NetDev]
-Name=dummy-midplane
-Kind=dummy

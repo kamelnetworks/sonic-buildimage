@@ -1,7 +1,0 @@
-#!/bin/bash
-
-if [ -c "/dev/rtc1" ]; then
-    sudo hwclock -w -f /dev/rtc1
-fi
-
-exec /sbin/reboot

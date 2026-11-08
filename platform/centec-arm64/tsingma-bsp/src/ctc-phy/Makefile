@@ -1,1 +1,0 @@
-obj-m = mars.o

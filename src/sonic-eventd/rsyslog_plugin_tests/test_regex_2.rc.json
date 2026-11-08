@@ -1,7 +1,0 @@
-[
-    {
-        "tag": "bgp-state",
-	"regex": ".* %ADJCHANGE: neighbor (.*) (Up|Down) .*",
-	"params": ["neighbor_ip", "state" ]
-    }
-]

@@ -1,6 +1,0 @@
-# LED microprocessor initialization for Dell S5224
-#
-#
-#Led0
-led auto on
-led start

@@ -1,2 +1,0 @@
-target/release/docker-rs usr/bin
-target/release/docker-wait-any-rs usr/bin

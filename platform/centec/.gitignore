@@ -1,8 +1,0 @@
-centec-dal/.dal*
-*.o
-*.ko
-.tmp_versions
-.centec*
-Module.symvers
-*.mod.c
-modules.order

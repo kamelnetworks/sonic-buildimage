@@ -1,2 +1,0 @@
-systemctl stop pddf-platform-init.service
-systemctl disable pddf-platform-init.service

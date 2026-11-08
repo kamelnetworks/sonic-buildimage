@@ -1,4 +1,0 @@
-check program dpu-db-util with path "/bin/systemctl is-active dpu-db-util.service"
-   if status != 0 then restart
-   start program = "/usr/bin/systemctl start dpu-db-util.service"
-   stop program  = "/usr/bin/systemctl stop dpu-db-util.service"

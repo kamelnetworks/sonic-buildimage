@@ -1,3 +1,0 @@
-#!/bin/bash
-
-/usr/local/bin/ds1000_platform_shutdown.sh system

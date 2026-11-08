@@ -1,3 +1,0 @@
-systemctl daemon-reload
-systemctl start s3ip-sysfs
-systemctl enable s3ip-sysfs

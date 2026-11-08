@@ -1,7 +1,0 @@
-{
-  "FEATURE": {
-    "warm-reboot": {
-        "state": "not-supported"
-    }
-  }
-}

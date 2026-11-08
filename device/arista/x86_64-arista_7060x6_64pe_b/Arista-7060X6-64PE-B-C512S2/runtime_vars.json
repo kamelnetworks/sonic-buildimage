@@ -1,7 +1,0 @@
-{
-    "DEVICE_METADATA": {
-        "localhost": {
-            "enable_per_port_counter_discovery": "true"
-        }
-    }
-}
