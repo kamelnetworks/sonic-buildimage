@@ -34,9 +34,7 @@ YANG_MODELS = ROOT / 'src/sonic-yang-models/yang-models'
 YANG_TEMPLATES = ROOT / 'src/sonic-yang-models/yang-templates'
 YANG_MGMT = ROOT / 'src/sonic-yang-mgmt'
 
-pytest.importorskip('libyang', reason='needs the libyang3 Python binding')
 sys.path.insert(0, str(YANG_MGMT))
-import sonic_yang  # noqa: E402
 
 # A SONIX-style policy: the peering LAN is accepted with a higher local
 # preference, everything else is denied, and the same maps are applied to a
@@ -146,6 +144,12 @@ def yang_dir(tmp_path_factory):
 
 @pytest.fixture(scope='module')
 def loaded_models(yang_dir):
+    # Keep the source-schema premise test runnable in lightweight CI. Skip
+    # only runtime cases when the binding is absent; a module-level skip
+    # collects zero tests and makes run-fork-unit-tests.sh fail with exit 5.
+    pytest.importorskip('libyang', reason='needs the libyang3 Python binding')
+    import sonic_yang
+
     syc = sonic_yang.SonicYang(yang_dir, print_log_enabled=False)
     syc.loadYangModel()
     return syc
@@ -217,6 +221,8 @@ def test_yjson_view_lists_route_maps(syc):
 
 
 def test_unknown_route_map_is_refused(syc):
+    import sonic_yang
+
     # The leaf-list must be validated as a leafref, not dropped on the way in.
     config = copy.deepcopy(CONFIG)
     config['BGP_PEER_GROUP_AF']['default|SONIX-PEERS|ipv4_unicast']['route_map_in'] = ['NO-SUCH-MAP']
@@ -227,6 +233,8 @@ def test_unknown_route_map_is_refused(syc):
 
 
 def test_second_route_map_is_refused(syc):
+    import sonic_yang
+
     # max-elements 1 from the grouping applies too.
     config = copy.deepcopy(CONFIG)
     config['BGP_NEIGHBOR_AF']['default|192.0.2.1|ipv4_unicast']['route_map_out'] = ['SONIX-OUT', 'SONIX-IN']
