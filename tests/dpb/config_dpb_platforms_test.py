@@ -212,3 +212,60 @@ def test_dependencies_need_force(env):
     assert db.cfgdb.get_table('BREAKOUT_CFG')[intf]['brkout_mode'] == target
     assert 'Vlan100|%s' % intf not in cm2.configdbJsonOut.get('VLAN_MEMBER', {})
     assert_layout(cm2, plat, intf, target, plat.children(intf, default))
+
+
+@pytest.mark.parametrize('mode,speed', [
+    ('4x25G[10G](4)', '25000'), ('4x10G[25G](4)', '10000')])
+def test_equivalent_alias_modes_keep_requested_speed(tmp_path, mode, speed):
+    """Real portconfig uses the first equivalent alias list, but requested speed."""
+    aliases = ['QSFP1/1', 'QSFP1/2', 'QSFP1/3', 'QSFP1/4']
+    platform = tmp_path / 'platform.json'
+    platform.write_text(json.dumps({'interfaces': {'Ethernet0': {
+        'index': '1,1,1,1', 'lanes': '1,2,3,4', 'breakout_modes': {
+            '4x25G[10G](4)': aliases, '4x10G[25G](4)': aliases}}}}))
+    hwsku = tmp_path / 'hwsku.json'
+    hwsku.write_text(json.dumps({'interfaces': {
+        'Ethernet0': {'default_brkout_mode': mode}}}))
+    children = portconfig.get_child_ports('Ethernet0', mode, str(platform))
+    assert [p['alias'] for p in children.values()] == aliases
+    assert [p['lanes'] for p in children.values()] == ['1', '2', '3', '4']
+    assert {p['speed'] for p in children.values()} == {speed}
+    generated, _, _ = portconfig.parse_platform_json_file(str(hwsku), str(platform))
+    assert generated == children
+
+
+def test_saved_legacy_seastone_modes_round_trip(env):
+    """Saved names still resolve; transition both ways without rewriting layouts."""
+    plat, db, _ = env
+    if plat.name != 'x86_64-cel_seastone_2-r0':
+        pytest.skip('legacy mode names are specific to Seastone 2')
+    for intf, props in plat.interfaces.items():
+        if PORT_FILTER and intf not in PORT_FILTER:
+            continue
+        legacy, expanded = (('1x100G', '1x100G[40G]') if len(props['lanes'].split(',')) == 4
+                            else ('1x10G', '1x10G[1G]'))
+        assert plat.children(intf, legacy) == plat.children(intf, expanded)
+        write_config_db(db.cfgdb, {'BREAKOUT_CFG': {intf: {'brkout_mode': legacy}}})
+        cm = make_config_mgmt(db.cfgdb)
+        config.load_ConfigMgmt = mock.MagicMock(return_value=cm)
+        # Reproduce the reported old-name -> breakout path as well as both
+        # old/current spellings. The initial PORT layout is already identical.
+        target = '4x25G[10G]' if legacy == '1x100G' else expanded
+        for mode in (target, legacy, expanded):
+            result = breakout(db, intf, mode, '-f')
+            assert result.exit_code == 0, (intf, mode, result.output)
+            assert db.cfgdb.get_table('BREAKOUT_CFG')[intf]['brkout_mode'] == mode
+            assert_layout(cm, plat, intf, mode, {})
+
+
+def test_removed_dell_four_way_mode_is_not_remapped(env):
+    plat, db, _ = env
+    if plat.name != 'x86_64-dellemc_s5232f_c3538-r0':
+        pytest.skip('management logical-port collision is specific to Dell')
+    before = read_config_db(db.cfgdb)
+    result = breakout(db, 'Ethernet124', '4x25G[10G]', '-f')
+    assert result.exit_code != 0
+    assert 'is not available for the port' in result.output
+    assert read_config_db(db.cfgdb) == before
+    with pytest.raises(RuntimeError, match='Unsupported breakout mode'):
+        plat.children('Ethernet124', '4x25G[10G]')

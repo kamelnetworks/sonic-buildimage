@@ -52,3 +52,30 @@ DPB_DEVICE_ROOT=/path/to/sonic-buildimage/device pytest -q tests/config_dpb_plat
 ```
 
 `DPB_PORTS=Ethernet0,Ethernet124` restricts the walk to a few ports.
+
+## Saved breakout modes during upgrade
+
+Seastone 2 retains the legacy `1x100G` and SFP `1x10G` mode entries alongside
+`1x100G[40G]` and `1x10G[1G]`. Their child port names, lanes, aliases and default
+speeds are identical. Existing saved `BREAKOUT_CFG` and custom HWSKU defaults
+therefore remain valid; no automatic database rewrite is required. New stock
+HWSKUs use the expanded modes. The CLI tests start with saved legacy names,
+transition into breakout and back, and compare real portconfig defaults.
+
+Dell `Ethernet124` is different: the removed four-way mode collides with the
+second SFP+ logical port and has no safe equivalent. Do not change only its
+`BREAKOUT_CFG` string to a two-port or one-port mode: that would misdescribe
+four live PORT rows. Before upgrading a system saved in that mode, arrange a
+controlled reconfiguration to a supported layout using the old image and its
+normal dependency handling, then verify PORT lanes/count, BREAKOUT_CFG and the
+second SFP+, and save the resulting configuration. If the old path cannot
+complete safely, stop and coordinate a maintenance recovery; do not let an
+automatic name migration choose a different physical layout. This PR neither
+remaps that mode nor attempts unsupported port creation.
+
+Compatibility aliases only preserve configurations whose saved mode already
+matches the actual PORT children. They do not repair a stale SONIX table that
+says `1x100G` while four 10G PORT rows exist. Audit names/lanes/count/speeds and
+regenerate PORT together with BREAKOUT_CFG from the intended HWSKU layout as
+part of the SONIX integration before enabling DPB; do not infer live layout
+from the old mode string alone.

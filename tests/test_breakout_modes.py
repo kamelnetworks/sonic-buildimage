@@ -52,8 +52,8 @@ class PlatformDataTest(unittest.TestCase):
         _, (plat,) = run_check(SEASTONE2)
         for name, props in plat.interfaces.items():
             if len(props["lanes"]) == 4:
-                self.assertEqual(sorted(props["modes"]), ["1x100G[40G]", "2x50G", "4x10G", "4x25G[10G]"], name)
-        self.assertEqual(sorted(plat.interfaces["Ethernet128"]["modes"]), ["1x10G[1G]"])
+                self.assertEqual(sorted(props["modes"]), ["1x100G", "1x100G[40G]", "2x50G", "4x10G", "4x25G[10G]"], name)
+        self.assertEqual(sorted(plat.interfaces["Ethernet128"]["modes"]), ["1x10G", "1x10G[1G]"])
         kids = plat.children("Ethernet8", "4x10G")
         self.assertEqual([(k, v["lanes"], v["speed"], v["alias"], v["index"]) for k, v in kids.items()], [
             ("Ethernet8", "9", "10000", "Eth3/1", "3"),
@@ -157,6 +157,15 @@ class ModeSemanticsTest(unittest.TestCase):
         report, _ = self.equivalent_platform(["w", "x", "y", "z"])
         self.assertTrue(any("different aliases" in error for error in report.errors), report.errors)
 
+    def test_legacy_seastone_modes_keep_existing_layout(self):
+        _, (platform,) = run_check(SEASTONE2)
+        for name, old, new in (("Ethernet0", "1x100G", "1x100G[40G]"),
+                               ("Ethernet128", "1x10G", "1x10G[1G]")):
+            old_ports = platform.children(name, old)
+            new_ports = platform.children(name, new)
+            for port in old_ports:
+                self.assertEqual({k: v for k, v in old_ports[port].items() if k != "_supported"},
+                                 {k: v for k, v in new_ports[port].items() if k != "_supported"})
 
 
 class SonixHwskuTest(unittest.TestCase):
