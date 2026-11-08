@@ -1,0 +1,16 @@
+Source: sonic-cel-platform-modules
+Section: main
+Priority: extra
+Maintainer: Wirut Getbamrung <wgetbumr@celestica.com>
+Build-Depends: debhelper (>= 8.0.0), bzip2, python3-setuptools, python3-wheel
+Standards-Version: 3.9.3
+
+Package: platform-modules-midstone-200i
+Architecture: amd64
+Depends: linux-image-6.12.41+deb13-sonic-amd64-unsigned
+Description: kernel modules for platform devices
+
+Package: platform-modules-silverstone-x
+Architecture: amd64
+Depends: linux-image-6.12.41+deb13-sonic-amd64-unsigned
+Description: kernel modules for platform devices

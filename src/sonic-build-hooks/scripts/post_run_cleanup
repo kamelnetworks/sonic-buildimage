@@ -1,0 +1,58 @@
+#!/bin/bash
+
+IMAGENAME=$1
+
+. /usr/local/share/buildinfo/scripts/buildinfo_base.sh
+
+set -x
+
+
+if [ ! -z "$(get_version_cache_option)" ]; then
+
+	#Delete the rsync package files, except where the image needs rsync at
+	#runtime: docker-base-* images install rsync explicitly for the
+	#changes-to-image pattern every downstream build relies on; purging it
+	#there breaks builds like docker-config-engine-trixie
+	#("rsync: not found").
+	if [[ ! ${IMAGENAME} =~ -slave- && ! ${IMAGENAME} =~ (^|/)docker-base- ]]; then
+		/usr/bin/apt-get purge -y --auto-remove rsync
+	fi
+fi
+
+apt-get clean -y
+apt-get autoclean -y
+apt-get autoremove -y --purge
+rm -f /var/cache/apt/archives/*.deb /var/cache/apt/*.bin
+
+if [[ ! ${IMAGENAME} =~ -slave- ]]; then
+	rm -rf /var/lib/apt/lists/*
+fi
+
+rm -rf /sonic/target /ssh
+rm -rf /tmp/*
+rm -rf /debs /python-wheels  ~/.cache
+find / | grep -E "__pycache__" | xargs rm -rf
+
+rm -rf $BUILD_VERSION_PATH/*
+
+# Disable the build hooks
+symlink_build_hooks -d
+set_reproducible_mirrors -d
+
+# Remove the version deb preference
+rm -f $VERSION_DEB_PREFERENCE
+rm -f /etc/apt/preferences.d/01-versions-deb
+
+# Remove all doc files
+find /usr/share/doc -depth \( -type f -o -type l \) ! -name copyright | xargs rm || true
+
+# Clean doc directories that are empty or only contain empty directories
+while [ -n "$(find /usr/share/doc -depth -type d -empty -print -exec rmdir {} +)" ]; do :; done && \
+    rm -rf               \
+    /usr/share/man/*     \
+    /usr/share/groff/*   \
+    /usr/share/info/*    \
+    /usr/share/lintian/* \
+    /usr/share/linda/*   \
+    /var/cache/man/*     \
+    /usr/share/locale/*

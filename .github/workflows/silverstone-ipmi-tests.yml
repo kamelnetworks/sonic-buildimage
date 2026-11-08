@@ -1,0 +1,23 @@
+name: Silverstone-X IPMI text
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/silverstone-ipmi-tests.yml'
+      - 'device/celestica/x86_64-cel_silverstone-x-r0/sonic_platform/helper.py'
+      - 'device/celestica/x86_64-cel_silverstone-x-r0/sonic_platform/fan.py'
+      - 'device/celestica/x86_64-cel_silverstone-x-r0/sonic_platform/psu.py'
+      - 'device/celestica/x86_64-cel_silverstone-x-r0/tests/test_ipmi_text.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ipmi-text:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check IPMI output and fan/PSU consumers without hardware
+        run: python3 -m unittest discover -s device/celestica/x86_64-cel_silverstone-x-r0/tests -p test_ipmi_text.py -v

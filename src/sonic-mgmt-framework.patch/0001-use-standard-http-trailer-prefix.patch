@@ -1,0 +1,39 @@
+Subject: Use the standard HTTP trailer prefix with Go 1.27
+
+Go 1.27 selects x/net/http2's stdlib-backed server, which does not expose
+TrailerPrefix. net/http exports the same constant and is already imported.
+Apply the compatibility patch after vendoring, including on clean builds.
+
+--- a/Makefile
++++ b/Makefile
+@@ -36,7 +36,7 @@
+ $(GO_MOD):
+ 	$(GO) mod init github.com/Azure/sonic-mgmt-framework
+ 
+-$(GO_DEPS): $(GO_MOD) $(GO_CODEGEN_INIT)
++$(GO_DEPS): $(GO_MOD) $(GO_CODEGEN_INIT) patches/grpc-http-trailers.patch
+ 	@# Run go mod tidy only if installed Go >= go.mod's go directive
+ 	@GO_MOD_VER=$$(sed -n 's/^go //p' go.mod) && \
+ 	 GO_CUR_VER=$$($(GO) env GOVERSION | sed 's/go//') && \
+@@ -48,6 +48,7 @@
+ 	 fi
+ 	$(GO) mod vendor
+ 	$(MGMT_COMMON_DIR)/patches/apply.sh vendor
++	patch -d vendor/google.golang.org/grpc -p1 < patches/grpc-http-trailers.patch
+ 	touch  $@
+ 
+ go-deps: $(GO_DEPS)
+--- /dev/null
++++ b/patches/grpc-http-trailers.patch
+@@ -0,0 +1,11 @@
++--- a/internal/transport/handler_server.go
+++++ b/internal/transport/handler_server.go
++@@ -268,7 +268,7 @@
++ 				for _, v := range vv {
++ 					// http2 ResponseWriter mechanism to send undeclared Trailers after
++ 					// the headers have possibly been written.
++-					h.Add(http2.TrailerPrefix+k, encodeMetadataHeader(k, v))
+++					h.Add(http.TrailerPrefix+k, encodeMetadataHeader(k, v))
++ 				}
++ 			}
++ 		}
