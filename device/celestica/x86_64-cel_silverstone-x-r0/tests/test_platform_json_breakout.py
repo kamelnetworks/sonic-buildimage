@@ -4,13 +4,17 @@
 and `hwsku.json` in the HWSKU directory. sonic-config-engine's portconfig.py
 then derives the child ports of a breakout mode from the parent's lane list:
 child `n` is `Ethernet<base + n * lanes_per_child>` and gets the next alias of
-the mode. These checks mirror that derivation (portconfig itself needs
-swsscommon) and pin the files to the layouts that already run on Teralynx 7
+the mode. Integration checks call real portconfig and sonic-cfggen with SONiC's
+compiled dependencies, and pin the files to layouts already run on Teralynx 7
 hardware: the stock 32x400G `Silverstone-x` HWSKU and the static SONIX
 breakouts (4x100G on QSFP25/26, 4x10G on QSFP3 of ixp-lab-sw1).
 """
 import json
-import re
+import copy
+import os
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -20,8 +24,15 @@ HWSKU_DIR = PLATFORM_DIR / 'Silverstone-x'
 HWSKU_JSON = HWSKU_DIR / 'hwsku.json'
 PORT_CONFIG_INI = HWSKU_DIR / 'port_config.ini'
 
-# portconfig.BRKOUT_PATTERN
-BRKOUT_PATTERN = r'(\d{1,6})x(\d{1,6}G?)(\[(\d{1,6}G?,?)*\])?(\((\d{1,6})\))?'
+REPO_ROOT = PLATFORM_DIR.parents[2]
+CONFIG_ENGINE = REPO_ROOT / 'src' / 'sonic-config-engine'
+sys.path.insert(0, str(CONFIG_ENGINE))
+try:
+    import portconfig
+except ImportError:
+    portconfig = None
+
+SONIC_DEPS = 'requires real SONiC swsscommon and sonic_py_common packages'
 
 # The modes every QSFP-DD cage offers, with the lane count per child port.
 # All of them run in production on SONIX Silverstone-X switches (sonix-ansible
@@ -38,27 +49,11 @@ QSFPDD_MODES = {
 SFP_MODES = {'1x10G': (1, 1)}
 
 
-def speed_to_int(speed):
-    return int(speed[:-1]) * 1000 if speed.endswith('G') else int(speed)
-
-
-def child_ports(name, lanes, aliases, mode):
-    """The PORT entries portconfig.BreakoutCfg.get_config derives for `mode`."""
-    num_ports, speed, _, _, _, assigned = re.fullmatch(BRKOUT_PATTERN, mode).groups()
-    num_ports = int(num_ports)
-    assigned = int(assigned) if assigned else len(lanes)
-    per_port = assigned // num_ports
-    base = int(name[len('Ethernet'):])
-    ports = {}
-    for n in range(num_ports):
-        lane_id = n * per_port
-        ports['Ethernet%d' % (base + lane_id)] = {
-            'alias': aliases[n],
-            'lanes': ','.join(lanes[lane_id:lane_id + per_port]),
-            'speed': str(speed_to_int(speed)),
-            'fec': 'rs' if speed_to_int(speed) // per_port >= 50000 else None,
-        }
-    return ports
+def child_ports(name, mode):
+    """Call the production parser; project only fields asserted by these fixtures."""
+    ports = portconfig.get_child_ports(name, mode, str(PLATFORM_JSON))
+    return {name: {key: row.get(key) for key in ('alias', 'lanes', 'speed', 'fec')}
+            for name, row in ports.items()}
 
 
 def read_port_config_ini():
@@ -67,7 +62,7 @@ def read_port_config_ini():
         if not line.strip() or line.startswith('#'):
             continue
         name, lanes, alias, speed, index, mtu, fec = line.split()
-        rows[name] = dict(lanes=lanes, alias=alias, speed=speed, index=index, fec=fec)
+        rows[name] = dict(lanes=lanes, alias=alias, speed=speed, index=index, mtu=mtu, fec=fec)
     return rows
 
 
@@ -106,7 +101,6 @@ class PlatformJsonTest(unittest.TestCase):
             expected = QSFPDD_MODES if alias.startswith('QSFP') else SFP_MODES
             self.assertEqual(sorted(modes), sorted(expected), name)
             for mode, (num_ports, per_port) in expected.items():
-                self.assertRegex(mode, '^' + BRKOUT_PATTERN + '$')
                 self.assertEqual(len(modes[mode]), num_ports, (name, mode))
                 if num_ports == 1:
                     self.assertEqual(modes[mode], [alias], (name, mode))
@@ -114,35 +108,78 @@ class PlatformJsonTest(unittest.TestCase):
                     self.assertEqual(modes[mode], ['%s/%d' % (alias, n + 1) for n in range(num_ports)], (name, mode))
                 self.assertLessEqual(num_ports * per_port, len(intf['lanes'].split(',')), (name, mode))
 
-    def test_hwsku_json_reproduces_port_config_ini(self):
-        """sonic-cfggen prefers platform.json + hwsku.json over port_config.ini,
-        so the default breakout of every port must give the stock 32x400G
-        (+ 2x10G SFP) layout, FEC included."""
-        self.assertEqual(sorted(self.hwsku), sorted(self.interfaces))
-        generated = {}
-        for name, entry in self.hwsku.items():
-            intf = self.interfaces[name]
-            mode = entry['default_brkout_mode']
-            self.assertIn(mode, intf['breakout_modes'], name)
-            ports = child_ports(name, intf['lanes'].split(','), intf['breakout_modes'][mode], mode)
-            for port in ports.values():
-                if 'fec' in entry:
-                    port['fec'] = entry['fec']
-            generated.update(ports)
-        self.assertEqual(sorted(generated), sorted(self.ini))
-        for name, port in generated.items():
-            row = self.ini[name]
-            self.assertEqual(port['alias'], row['alias'], name)
-            self.assertEqual(port['lanes'], row['lanes'], name)
-            self.assertEqual(port['speed'], row['speed'], name)
-            self.assertEqual(port['fec'] or 'none', row['fec'], name)
+    @unittest.skipIf(portconfig is None, SONIC_DEPS)
+    def test_real_parser_accepts_every_offered_mode(self):
+        for name, interface in self.interfaces.items():
+            for mode, aliases in interface['breakout_modes'].items():
+                with self.subTest(port=name, mode=mode):
+                    ports = portconfig.get_child_ports(name, mode, str(PLATFORM_JSON))
+                    self.assertEqual([row['alias'] for row in ports.values()], aliases)
+                    if mode in ('4x25G[10G](4)', '4x10G[25G](4)'):
+                        speed = '25000' if mode.startswith('4x25G') else '10000'
+                        self.assertEqual({row['speed'] for row in ports.values()}, {speed})
 
+    @unittest.skipIf(portconfig is None, SONIC_DEPS)
+    def test_hwsku_json_reproduces_port_config_ini(self):
+        legacy = portconfig.parse_port_config_file(str(PORT_CONFIG_INI))[0]
+        generated = portconfig.parse_platform_json_file(str(HWSKU_JSON), str(PLATFORM_JSON))[0]
+        # The sole additional field is the DPB position for an unbroken cage.
+        for row in generated.values():
+            self.assertEqual(row.pop('subport'), '0')
+        self.assertEqual(generated, legacy)
+
+    @unittest.skipIf(portconfig is None, SONIC_DEPS)
+    def test_optional_attributes_remain_explicit_or_omitted(self):
+        hwsku = copy.deepcopy(self.hwsku)
+        hwsku['Ethernet0']['mtu'] = '1600'
+        hwsku['Ethernet0']['fec'] = 'none'
+        del hwsku['Ethernet8']['mtu']
+        del hwsku['Ethernet256']['fec']
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'hwsku.json'
+            path.write_text(json.dumps({'interfaces': hwsku}))
+            ports = portconfig.parse_platform_json_file(str(path), str(PLATFORM_JSON))[0]
+        self.assertEqual(ports['Ethernet0']['mtu'], '1600')
+        self.assertEqual(ports['Ethernet0']['fec'], 'none')
+        self.assertNotIn('mtu', ports['Ethernet8'])
+        self.assertNotIn('fec', ports['Ethernet256'])
+
+    @unittest.skipIf(portconfig is None, SONIC_DEPS)
+    def test_sonic_cfggen_default_ports_are_equivalent(self):
+        # Redirect only the HWSKU lookup to fixture files. Execute production
+        # sonic-cfggen without CONFIG_DB writes or a running switch's HWSKU.
+        wrapper = (
+            'import portconfig, runpy, sys; '
+            'portconfig.HWSKU_ROOT_PATH = sys.argv.pop(1); '
+            'script = sys.argv.pop(1); sys.argv[0] = script; '
+            'runpy.run_path(script, run_name="__main__")'
+        )
+        env = dict(os.environ, CFGGEN_UNIT_TESTING='1')
+        env['PYTHONPATH'] = str(CONFIG_ENGINE) + os.pathsep + env.get('PYTHONPATH', '')
+        def generate(portfile, extra=(), preset=None):
+            output = subprocess.check_output([
+                sys.executable, '-c', wrapper, str(HWSKU_DIR),
+                str(CONFIG_ENGINE / 'sonic-cfggen'), '-k', 'Silverstone-x',
+                '-p', str(portfile), *extra,
+                *(['--preset', preset] if preset else ['--print-data'])], env=env)
+            return json.loads(output)['PORT']
+        for preset in (None, 'l1', 'l2'):
+            with self.subTest(preset=preset):
+                legacy = generate(PORT_CONFIG_INI, preset=preset)
+                generated = generate(PLATFORM_JSON, ('-S', str(HWSKU_JSON)), preset=preset)
+                for row in generated.values():
+                    self.assertEqual(row.pop('subport'), '0')
+                    # l1 overrides MTU; l2 preserves an explicit source value.
+                    self.assertEqual(row['mtu'], '9100' if preset == 'l1' else '9126')
+                self.assertEqual(generated, legacy)
+
+    @unittest.skipIf(portconfig is None, SONIC_DEPS)
     def test_child_ports_match_the_static_sonix_breakouts(self):
         """The names, lanes and speeds DPB produces equal what the static SONIX
         HWSKU of ixp-lab-sw1 defines by hand for the same cages."""
         qsfp25 = self.interfaces['Ethernet192']
         self.assertEqual(
-            child_ports('Ethernet192', qsfp25['lanes'].split(','), qsfp25['breakout_modes']['4x100G'], '4x100G'),
+            child_ports('Ethernet192', '4x100G'),
             {
                 'Ethernet192': {'alias': 'QSFP25/1', 'lanes': '89,90', 'speed': '100000', 'fec': 'rs'},
                 'Ethernet194': {'alias': 'QSFP25/2', 'lanes': '91,92', 'speed': '100000', 'fec': 'rs'},
@@ -151,7 +188,7 @@ class PlatformJsonTest(unittest.TestCase):
             })
         qsfp3 = self.interfaces['Ethernet16']
         self.assertEqual(
-            child_ports('Ethernet16', qsfp3['lanes'].split(','), qsfp3['breakout_modes']['4x10G[25G](4)'], '4x10G[25G](4)'),
+            child_ports('Ethernet16', '4x10G[25G](4)'),
             {
                 'Ethernet16': {'alias': 'QSFP3/1', 'lanes': '201', 'speed': '10000', 'fec': None},
                 'Ethernet17': {'alias': 'QSFP3/2', 'lanes': '202', 'speed': '10000', 'fec': None},
@@ -160,7 +197,7 @@ class PlatformJsonTest(unittest.TestCase):
             })
         qsfp1 = self.interfaces['Ethernet0']
         self.assertEqual(
-            child_ports('Ethernet0', qsfp1['lanes'].split(','), qsfp1['breakout_modes']['2x200G'], '2x200G'),
+            child_ports('Ethernet0', '2x200G'),
             {
                 'Ethernet0': {'alias': 'QSFP1/1', 'lanes': '217,218,219,220', 'speed': '200000', 'fec': 'rs'},
                 'Ethernet4': {'alias': 'QSFP1/2', 'lanes': '221,222,223,224', 'speed': '200000', 'fec': 'rs'},
