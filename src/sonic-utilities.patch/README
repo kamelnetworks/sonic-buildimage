@@ -6,3 +6,11 @@ If #164 is approved, preserve BOTH patch files and BOTH series entries when
 resolving its add/add series conflict. Never choose one side wholesale.
 Run the patch-series application checks and the sonic-utilities ACL/NTP tests
 against the resulting series and the pinned sonic-utilities source.
+
+0003 exposes APPL_DB remote-VNI requests without a matching same-namespace
+STATE_DB tunnel entry (issue #187, partial observability follow-up to #73).
+It preserves existing operational-state rows and count semantics, and does
+not infer ASIC state or a capacity/failure diagnosis from missing tunnel state.
+The carried CLI tests cover multiple VNIs, IPv6, namespace isolation and
+empty/deleted/partial records. Keep it alongside the ACL patch and any
+independently approved NTP patch when resolving series conflicts.
