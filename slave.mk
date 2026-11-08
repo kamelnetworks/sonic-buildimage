@@ -704,6 +704,10 @@ endef
 # Sonic docker images are always created with username as extension. During the load operation,
 # it loads the docker image from compressed tar file and tag them with username as extension.
 # The load operation is protected with lock for parallel build.
+# The reference to tag is taken from what `docker load` reports, not assumed to be
+# $(1):$(docker-get-tag): an archive restored from the package cache may have been saved by
+# another build (another SONIC_IMAGE_VERSION, or with the docker in/out of SONIC_PACKAGES_LOCAL),
+# and then carries that build's tag. See scripts/docker_image_load.sh.
 #
 # $(1) => Docker name
 # $(2) => Docker target name
@@ -712,13 +716,7 @@ define docker-image-load
     $(call MOD_LOCK,$(1),$(DOCKER_LOCKDIR),$(DOCKER_LOCKFILE_SUFFIX),$(DOCKER_LOCKFILE_TIMEOUT))
     @echo "Obtained docker image lock for $(1) load" $(LOG)
     @echo "Loading docker image $(TARGET_PATH)/$(1).gz" $(LOG)
-    docker load -i $(TARGET_PATH)/$(1).gz $(LOG)
-    @echo "Tagging docker image $(1):$(call docker-get-tag,$(1)) as $(1)-$(DOCKER_USERNAME):$(DOCKER_USERTAG)" $(LOG)
-    docker tag $(1):$(call docker-get-tag,$(1)) $(1)-$(DOCKER_USERNAME):$(DOCKER_USERTAG) $(LOG)
-    if [ x$(SONIC_CONFIG_USE_NATIVE_DOCKERD_FOR_BUILD) == x"y" ]; then
-        @echo "Removing docker image $(1):latest" $(LOG)
-        docker rmi -f $(1):$(call docker-get-tag,$(1)) $(LOG)
-    fi
+    scripts/docker_image_load.sh $(TARGET_PATH)/$(1).gz $(1)-$(DOCKER_USERNAME):$(DOCKER_USERTAG) "$(SONIC_CONFIG_USE_NATIVE_DOCKERD_FOR_BUILD)" $(1):$(call docker-get-tag,$(1)) $(LOG)
     $(call MOD_UNLOCK,$(1))
     @echo "Released docker image lock for $(1) load" $(LOG)
 endef
@@ -1870,6 +1868,7 @@ $(addprefix $(TARGET_PATH)/, $(SONIC_INSTALLERS)) : $(TARGET_PATH)/% : \
 	export enable_auto_tech_support="$(ENABLE_AUTO_TECH_SUPPORT)"
 	export enable_asan="$(ENABLE_ASAN)"
 	export include_macsec="$(INCLUDE_MACSEC)"
+	export include_dhcp_relay="$(INCLUDE_DHCP_RELAY)"
 	export include_dhcp_server="$(INCLUDE_DHCP_SERVER)"
 	export include_mgmt_framework="$(INCLUDE_MGMT_FRAMEWORK)"
 	export include_iccpd="$(INCLUDE_ICCPD)"

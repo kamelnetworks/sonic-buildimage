@@ -7,9 +7,11 @@ name: sonic-build
 # What it does:
 #   - Release builds always build vs, broadcom, and marvell-teralynx in
 #     parallel (matrix), requiring all three to succeed, the way the Azure Build
-#     stage did: full image (sonic-<platform>.bin) plus, when requested, the
-#     INSTALL_DEBUG_TOOLS=y image (sonic-<platform>-dbg.bin) whose side
-#     artifacts are the docker-*-dbg.gz debug docker images.
+#     stage did: full image (sonic-<platform>.bin) plus the INSTALL_DEBUG_TOOLS=y
+#     image (sonic-<platform>-dbg.bin) whose side artifacts are the
+#     docker-*-dbg.gz debug docker images. Release builds always build the
+#     debug image; non-release builds only when debug_image=true (#56: the
+#     debug pass is a second installer assembly, 25-95 min per platform).
 #   - Creates a GitHub release tagged build-<branch>-<run_number>, titled
 #     <branch>-v<run_number>, prerelease by default (like the Azure
 #     GitHubRelease@1 isPreRelease: true), with release notes
@@ -72,10 +74,10 @@ on:
         required: false
         default: 'vs'
       debug_image:
-        description: 'Also build the INSTALL_DEBUG_TOOLS=y image and docker-*-dbg.gz images'
+        description: 'Non-release builds only: also build the INSTALL_DEBUG_TOOLS=y image and docker-*-dbg.gz images. Releases always build them.'
         required: false
         type: boolean
-        default: true
+        default: false
       create_release:
         description: 'Publish <branch>-v<run_number> after all three full-image builds succeed (tag: build-<branch>-<run_number>)'
         required: false
@@ -502,8 +504,11 @@ jobs:
 
       - name: Build (debug-tools image + docker-*-dbg.gz)
         # Only for full-image builds; a targets override replaces the whole
-        # build, like tools/kubernetes/build.sh does.
-        if: ${{ inputs.debug_image && inputs.targets == '' }}
+        # build, like tools/kubernetes/build.sh does. Releases always build
+        # the debug image (its docker-*-dbg.gz are release assets); other
+        # dispatches only on request, since this pass assembles a second
+        # installer (#56).
+        if: ${{ (inputs.debug_image || inputs.create_release) && inputs.targets == '' }}
         run: |
           make NOBOOKWORM=1 $BUILD_OPTS INSTALL_DEBUG_TOOLS=y target/sonic-$MATRIX_PLATFORM.bin
           mv target/sonic-$MATRIX_PLATFORM.bin target/sonic-$MATRIX_PLATFORM-dbg.bin
@@ -523,15 +528,24 @@ jobs:
 
       - name: Check dirty version
         # Only meaningful after a build; skip when an earlier step failed.
+        # Must stay before 'Upload release assets to the draft': a release
+        # leg with a -dirty version fails here, so its upload (gated on
+        # success()) never runs and the release job never publishes (#115).
         if: ${{ success() }}
+        env:
+          CREATE_RELEASE: ${{ inputs.create_release }}
         run: |
           source functions.sh
           sonic_version=$(sonic_get_version)
           echo "version: $sonic_version"
           if [[ "$sonic_version" == *dirty* ]]; then
-            # Warning only for manual branch builds, like the Azure flow.
             git status --untracked-files=no -s --ignore-submodules || true
             git diff --ignore-submodules --stat || true
+            if [[ "$CREATE_RELEASE" == "true" ]]; then
+              echo "::error::Release build version is dirty: $sonic_version; refusing to upload release assets."
+              exit 1
+            fi
+            # Warning only for non-release builds, like the Azure flow.
             echo "::warning::Build version is dirty: $sonic_version"
           fi
 

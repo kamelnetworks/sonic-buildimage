@@ -94,7 +94,7 @@ class Fan(FanBase):
             cmd = IPMI_GET_PSU_MODEL.format(PSU_FRU_BASE + self.psu_index)
             status, output = self._api_helper.run_command(cmd)
             if status and output:
-                model = output.split(':')[-1]
+                model = output.split(':')[-1].rstrip()
                 if len(model) > 0:
                     if model[-2:] == ' B':
                         direction = self.FAN_DIRECTION_INTAKE
@@ -235,7 +235,7 @@ class Fan(FanBase):
             0x2: red
             0x3: off
         """
-        status = NOT_AVAILABLE
+        led = NOT_AVAILABLE
         color_dict = {\
             0: self.STATUS_LED_COLOR_OFF,\
             1: self.STATUS_LED_COLOR_AMBER,\
@@ -244,12 +244,12 @@ class Fan(FanBase):
 
         if not self.is_psu_fan:
             cmd = IPMI_GET_STATUS_LED.format(self._fan_led_offset)
-            status, output = self._api_helper.run_command(cmd) 
+            status, output = self._api_helper.run_command(cmd)
             if status:
                 color = int(output, 16)
-                status = color_dict.get(color, status)
- 
-        return status
+                led = color_dict.get(color, NOT_AVAILABLE)
+
+        return led
 
 
     ##############################################################
@@ -288,7 +288,9 @@ class Fan(FanBase):
 
         cmd = IPMI_GET_PRESENCE.format(self._fan_status_offset)
         status, output = self._api_helper.run_command(cmd)
-        if status and output == "00":
+        # ipmitool prints each byte with a leading space (" 00"), and
+        # subprocess.getstatusoutput only drops the trailing newline.
+        if status and output.strip() == "00":
             presence = True
 
         return presence

@@ -1,0 +1,39 @@
+# Runs every hardware-free unit test of the fork, found by convention (see
+# "Fork unit tests" in .github/workflows/README.md). New tests in a tests/
+# directory are picked up without changing this file.
+name: Fork unit tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - 202611-master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-unit-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # Python of the sonic-slave-trixie image.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: scripts/fork-unit-tests-requirements.txt
+      - name: Install the test dependencies
+        run: python -m pip install -r scripts/fork-unit-tests-requirements.txt
+      - name: Discover and run the tests (pinned submodules, no build)
+        env:
+          PYTHON: python
+        run: scripts/run-fork-unit-tests.sh

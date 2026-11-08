@@ -18,6 +18,7 @@ WORKFLOW = yaml.safe_load(
 )
 PLATFORMS = ['broadcom', 'marvell-teralynx', 'vs']
 RELEASE_HELPER = Path(__file__).parents[1] / 'scripts/release-assets.sh'
+FUNCTIONS_SH = Path(__file__).parents[1] / 'functions.sh'
 
 
 def script(job, name):
@@ -220,6 +221,53 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertIn('!inputs.create_release', step['if'])
         self.assertIn('success()', step['if'])
         self.assertNotIn('gh release', step['run'])
+
+    def dirty_check(self, release, dirty):
+        # A throwaway git checkout with the real functions.sh, so the step's
+        # sonic_get_version sees a clean or modified tracked file.
+        git = ['git', '-c', 'user.name=t', '-c', 'user.email=t@example.invalid']
+        (self.root / 'functions.sh').write_text(FUNCTIONS_SH.read_text())
+        (self.root / 'Makefile.work').write_text('original\n')
+        for args in (['init', '-q', '-b', 'test-branch'], ['add', '.'], ['commit', '-qm', 'base']):
+            subprocess.run(git + args, cwd=self.root, check=True, capture_output=True)
+        if dirty:
+            (self.root / 'Makefile.work').write_text('hand edit\n')
+        self.env.update(CREATE_RELEASE=str(release).lower(), BUILD_NUMBER='42',
+                        BUILD_TIMESTAMP='20261103.000000')
+        return self.run_script(script('build', 'Check dirty version'))
+
+    def test_dirty_release_build_fails(self):
+        result = self.dirty_check(release=True, dirty=True)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('::error::Release build version is dirty', result.stdout)
+        self.assertIn('Makefile.work', result.stdout)
+
+    def test_clean_release_build_passes(self):
+        result = self.dirty_check(release=True, dirty=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn('dirty', result.stdout)
+
+    def test_dirty_non_release_build_only_warns(self):
+        result = self.dirty_check(release=False, dirty=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('::warning::Build version is dirty', result.stdout)
+        self.assertNotIn('::error::', result.stdout)
+
+    def test_dirty_check_gates_release_upload(self):
+        steps = WORKFLOW['jobs']['build']['steps']
+        names = [s.get('name') for s in steps]
+        check = names.index('Check dirty version')
+        upload = names.index('Upload release assets to the draft')
+        self.assertLess(check, upload)
+        # No step before the check may touch the release.
+        for step in steps[:check]:
+            self.assertNotIn('gh release', step.get('run', ''), step.get('name'))
+        self.assertEqual(steps[check]['env']['CREATE_RELEASE'], '${{ inputs.create_release }}')
+        self.assertNotIn('continue-on-error', steps[check])
+        # A failed check must skip the upload, so the release job never
+        # sees a successful leg.
+        self.assertIn('success()', steps[upload]['if'])
+        self.assertNotIn('always()', steps[upload]['if'])
 
     def test_publish_preserves_branch_version_title(self):
         self.env.update(RELEASE_TAG='build-202611-master-42', RELEASE_TITLE='202611-master-v42')

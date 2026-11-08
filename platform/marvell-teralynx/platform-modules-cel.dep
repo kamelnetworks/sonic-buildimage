@@ -2,6 +2,10 @@ SPATH_CEL := $($(CEL_MIDSTONE_200I_PLATFORM_MODULE)_SRC_PATH)
 DEP_FILES := $(SONIC_COMMON_FILES_LIST) $(PLATFORM_PATH)/platform-modules-cel.mk $(PLATFORM_PATH)/platform-modules-cel.dep
 DEP_FILES += $(SONIC_COMMON_BASE_FILES_LIST)
 DEP_FILES += $(shell git ls-files -- $(SPATH_CEL))
+# platform-modules-silverstone-x packages the device tree's sonic_platform
+# (silverstone-x/setup.py: package_dir = ../../../../device/<vendor>/<platform>/sonic_platform),
+# so those sources are part of the package's cache key too (#138).
+DEP_FILES += $(shell git ls-files -- device/celestica/$($(CEL_SILVERSTONE_X_PLATFORM_MODULE)_PLATFORM)/sonic_platform)
 
 $(CEL_MIDSTONE_200I_PLATFORM_MODULE)_CACHE_MODE := GIT_CONTENT_SHA
 $(CEL_MIDSTONE_200I_PLATFORM_MODULE)_DEP_FLAGS := $(SONIC_COMMON_FLAGS_LIST)

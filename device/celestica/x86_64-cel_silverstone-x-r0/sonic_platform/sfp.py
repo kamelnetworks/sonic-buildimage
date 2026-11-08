@@ -49,9 +49,13 @@ class Sfp(SfpOptoeBase):
         SfpOptoeBase.__init__(self)
         self.index = index
         self.port_type, self.port_name = self.__get_port_info()
+        # The optoe class the platform init script bound matches the cage.
+        # Probing the inserted media and re-binding the driver writes sysfs,
+        # so it is not done here: every 'show' command that builds a Chassis
+        # builds all Sfps (kamelnetworks/sonic-buildimage#101). The chassis
+        # calls initialize_media() from the change-event path instead.
         self.sfp_type = self.port_type
         self.eeprom_path = '/sys/bus/i2c/devices/i2c-{0}/{0}-0050/eeprom'.format(SFP_I2C_START + index)
-        self._initialize_media()
 
     def __get_port_info(self):
         if self.index >= 0 and self.index <= 31:
@@ -66,9 +70,13 @@ class Sfp(SfpOptoeBase):
     def get_name(self):
         return "SFP/SFP+/SFP28" if self.index < 25 else "QSFP28 or later"
 
-    def _initialize_media(self):
+    def initialize_media(self):
         """
-        Initialize the media type and eeprom driver for SFP
+        Probe the inserted module's media type and bind the matching optoe
+        driver (delete_device/new_device under /sys/bus/i2c). This changes
+        kernel state, so only the daemon that owns the port may call it:
+        Chassis.get_change_event() does, for every insertion event. Never
+        call it from a constructor or a getter.
         """
         if self.get_presence():
             self._probe_media_type()
@@ -243,9 +251,10 @@ class Sfp(SfpOptoeBase):
         """
         Changes the driver based on media type detected
         """
-        del_sfp_path = "/sys/bus/i2c/devices/i2c-{0}/delete_device".format(self.index + SFP_I2C_START)
-        new_sfp_path = "/sys/bus/i2c/devices/i2c-{0}/new_device".format(self.index + SFP_I2C_START)
-        driver_path = "/sys/bus/i2c/devices/{0}-0050/name".format(self.index + SFP_I2C_START)
+        bus = self.index + SFP_I2C_START
+        del_sfp_path = "/sys/bus/i2c/devices/i2c-{0}/delete_device".format(bus)
+        new_sfp_path = "/sys/bus/i2c/devices/i2c-{0}/new_device".format(bus)
+        driver_path = "/sys/bus/i2c/devices/{0}-0050/name".format(bus)
         delete_device = "echo 0x50 >" + del_sfp_path
 
         if not os.path.isfile(driver_path):
@@ -257,30 +266,42 @@ class Sfp(SfpOptoeBase):
                 driver_name = fd.read()
                 driver_name = driver_name.rstrip('\r\n')
                 driver_name = driver_name.lstrip(" ")
-
-            #Avoid re-initialization of the QSFP/SFP optic on QSFP/SFP port.
-            if self.sfp_type == 'SFP' and driver_name != 'optoe2':
-                subprocess.Popen(delete_device, shell=True, stdout=subprocess.PIPE)
-                time.sleep(0.2)
-                new_device = "echo optoe2 0x50 >" + new_sfp_path
-                subprocess.Popen(new_device, shell=True, stdout=subprocess.PIPE)
-                time.sleep(2)
-            elif self.sfp_type == 'QSFP' and driver_name != 'optoe1':
-                subprocess.Popen(delete_device, shell=True, stdout=subprocess.PIPE)
-                time.sleep(0.2)
-                new_device = "echo optoe1 0x50 >" + new_sfp_path
-                subprocess.Popen(new_device, shell=True, stdout=subprocess.PIPE)
-                time.sleep(2)
-            elif self.sfp_type == 'QSFP_DD' and driver_name != 'optoe3':
-                subprocess.Popen(delete_device, shell=True, stdout=subprocess.PIPE)
-                time.sleep(0.2)
-                new_device = "echo optoe3 0x50 >" + new_sfp_path
-                subprocess.Popen(new_device, shell=True, stdout=subprocess.PIPE)
-                time.sleep(2)
-
         except IOError as e:
             print("Error: Unable to open file: %s" % str(e))
             return False
+
+        #Avoid re-initialization of the QSFP/SFP optic on QSFP/SFP port.
+        if self.sfp_type == 'SFP' and driver_name != 'optoe2':
+            new_device = "echo optoe2 0x50 >" + new_sfp_path
+        elif self.sfp_type == 'QSFP' and driver_name != 'optoe1':
+            new_device = "echo optoe1 0x50 >" + new_sfp_path
+        elif self.sfp_type == 'QSFP_DD' and driver_name != 'optoe3':
+            new_device = "echo optoe3 0x50 >" + new_sfp_path
+        else:
+            return True
+
+        subprocess.Popen(delete_device, shell=True, stdout=subprocess.PIPE)
+        time.sleep(0.2)
+        subprocess.Popen(new_device, shell=True, stdout=subprocess.PIPE)
+        time.sleep(2)
+        return self._restore_port_name()
+
+    def _restore_port_name(self):
+        """
+        Writes the cage's port_name back after a re-bind. A new optoe device
+        starts with the driver default port_name ('unitialized', sic), and
+        the name the platform init script gave the cage (qsfpN / sfpN, see
+        platform-modules-silverstone-x.init) is lost with the old device
+        (kamelnetworks/sonic-buildimage#149).
+        """
+        port_name_path = "/sys/bus/i2c/devices/{0}-0050/port_name".format(self.index + SFP_I2C_START)
+        try:
+            with open(port_name_path, 'w') as fd:
+                fd.write(self.port_name.lower())
+        except IOError as e:
+            print("Error: Unable to set port_name: %s" % str(e))
+            return False
+        return True
 
     def get_error_description(self):
         """

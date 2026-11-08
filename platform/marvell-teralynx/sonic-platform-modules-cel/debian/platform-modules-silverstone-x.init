@@ -11,6 +11,61 @@
 # Short-Description: Setup SilverStone-x board.
 ### END INIT INFO
 
+# Where the i2c buses live. The tests point this at a fake tree.
+I2C_SYSFS=${I2C_SYSFS:-/sys/bus/i2c/devices}
+
+# Wait up to $1 seconds for buses i2c-$2 .. i2c-$3 to exist. Returns 1 and
+# logs the buses still missing when the wait times out.
+#
+# The transceiver buses i2c-12..51 are registered by cls_pca954x when it
+# binds the five pca9548 switches that fpga_i2c_ocores creates on i2c-11
+# (fpga_device.c, om_muxes). If cls_pca954x is already loaded this happens
+# inside "modprobe fpga_i2c_ocores"; if udev loads it on the i2c:pca9548
+# uevent instead, the buses appear some time after modprobe returns. The
+# device creation below used to run straight away and skip every bus that
+# was not there yet (issue #139).
+wait_for_i2c_buses() {
+	local timeout=$1 first=$2 last=$3
+	local tries=$((timeout * 5)) missing i
+	while :; do
+		missing=""
+		for i in $(seq "$first" "$last"); do
+			[ -e "$I2C_SYSFS/i2c-$i/name" ] || missing="$missing i2c-$i"
+		done
+		[ -z "$missing" ] && return 0
+		[ "$tries" -gt 0 ] || break
+		tries=$((tries - 1))
+		sleep 0.2
+	done
+	echo "platform-modules-silverstone-x: timed out after ${timeout}s waiting for i2c buses:$missing" >&2
+	return 1
+}
+
+# Instantiate the transceiver EEPROMs: bus 12~43 for the 32 qsfp ports,
+# 44 for sfp1 and 45 for sfp2. Buses that are still missing after the
+# wait are logged and skipped, so the other ports keep working.
+create_optoe_devices() {
+	wait_for_i2c_buses "${I2C_BUS_TIMEOUT:-30}" 12 45
+	for i in {12..43}; do
+		devname=`cat "$I2C_SYSFS"/i2c-"$i"/name 2> /dev/null`
+		if [[ $devname == *'mux'* ]]; then
+			echo optoe1 0x50 > "$I2C_SYSFS"/i2c-"$i"/new_device
+			port=`expr $i - 11`
+			echo qsfp$port  > "$I2C_SYSFS"/i2c-"$i"/"$i"-0050/port_name
+		fi
+	done
+	for i in {44..45}; do
+		devname=`cat "$I2C_SYSFS"/i2c-"$i"/name 2> /dev/null`
+		if [[ $devname == *'mux'* ]]; then
+			echo optoe2 0x50 > "$I2C_SYSFS"/i2c-"$i"/new_device
+			port=`expr $i - 43`
+			echo sfp$port  > "$I2C_SYSFS"/i2c-"$i"/"$i"-0050/port_name
+		fi
+	done
+}
+
+# The tests source this file for the functions above and stop here.
+[ "${BASH_SOURCE[0]}" != "$0" ] && return 0
 
 case "$1" in
 start)
@@ -21,10 +76,19 @@ start)
 	modprobe fpga_device
 	modprobe fpga_system
 	modprobe i2c_switchcpld
+	# Load the mux driver before the FPGA i2c adapters, so the pca9548
+	# switches on i2c-11 bind (and register i2c-12..51) inside the next
+	# modprobe instead of whenever udev gets to them (issue #139).
+	modprobe cls-i2c-mux-pca954x
 	modprobe fpga_i2c_ocores
 	modprobe fpga_xcvr
 	modprobe lpc_basecpld
 	modprobe mc24lc64t
+	# optoe comes from the SONiC kernel (CONFIG_EEPROM_OPTOE=m): it binds
+	# optoe1 (SFF-8436/8636 QSFP), optoe2 (SFF-8472 SFP) and optoe3
+	# (CMIS QSFP-DD/OSFP, with page and bank select). This package must
+	# not ship its own optoe.ko: a copy under extra/ can shadow the
+	# kernel's module and lose optoe3 (issue #27).
 	modprobe optoe
        	
 	# Instantiate TLV EEPROM device on I801/ISMT bus 
@@ -37,23 +101,7 @@ start)
                	echo switchboard 0x30 > /sys/bus/i2c/devices/i2c-10/new_device
                 echo switchboard 0x31 > /sys/bus/i2c/devices/i2c-10/new_device
         fi
-	# bus 12~43 for 32 qsfp ports and 44 for sfp1 45 for sfp2
-	for i in {12..43}; do
-        	devname=`cat /sys/bus/i2c/devices/i2c-"$i"/name`
-        	if [[ $devname == *'mux'* ]]; then
-                	echo optoe1 0x50 > /sys/bus/i2c/devices/i2c-"$i"/new_device
-			port=`expr $i - 11`
-			echo qsfp$port  > /sys/bus/i2c/devices/i2c-"$i"/"$i"-0050/port_name
-        	fi
-	done
-	for i in {44..45}; do
-        	devname=`cat /sys/bus/i2c/devices/i2c-"$i"/name`
-        	if [[ $devname == *'mux'* ]]; then
-                	echo optoe2 0x50 > /sys/bus/i2c/devices/i2c-"$i"/new_device
-			port=`expr $i - 43`
-			echo sfp$port  > /sys/bus/i2c/devices/i2c-"$i"/"$i"-0050/port_name
-        	fi
-	done
+	create_optoe_devices
         decode-syseeprom --init 2> /dev/null &
 
         /bin/sh /usr/local/bin/platform_api_mgnt.sh init
