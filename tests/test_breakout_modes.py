@@ -128,6 +128,36 @@ class ModeSemanticsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             cbm.child_ports("Ethernet0", ["1", "2", "3", "4"], ["1"] * 4, ["a"], cbm.parse_mode("4x25G", 4))
 
+    def equivalent_platform(self, second_aliases):
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory)
+        data = {"interfaces": {"Ethernet0": {
+            "index": "1,1,1,1", "lanes": "1,2,3,4",
+            "breakout_modes": {
+                "4x25G[10G](4)": ["a", "b", "c", "d"],
+                "4x10G[25G](4)": second_aliases,
+            },
+        }}}
+        with open(os.path.join(directory, "platform.json"), "w") as handle:
+            json.dump(data, handle)
+        report = cbm.Report()
+        return report, cbm.Platform(directory, report)
+
+    def test_equivalent_speed_modes_keep_requested_default(self):
+        report, platform = self.equivalent_platform(["a", "b", "c", "d"])
+        self.assertEqual(report.errors, [])
+        for mode, speed in (("4x25G[10G](4)", "25000"),
+                            ("4x10G[25G](4)", "10000")):
+            ports = platform.generate({"interfaces": {
+                "Ethernet0": {"default_brkout_mode": mode}}})
+            self.assertEqual([p["alias"] for p in ports.values()], ["a", "b", "c", "d"])
+            self.assertEqual({p["speed"] for p in ports.values()}, {speed})
+
+    def test_equivalent_speed_modes_with_different_aliases_are_rejected(self):
+        report, _ = self.equivalent_platform(["w", "x", "y", "z"])
+        self.assertTrue(any("different aliases" in error for error in report.errors), report.errors)
+
+
 
 class SonixHwskuTest(unittest.TestCase):
     """What a SONIX HWSKU needs: a hwsku.json equivalent to its port_config.ini."""

@@ -7,7 +7,7 @@ script checks, without any SONiC runtime:
 * ``platform.json``: every interface carries ``index``, ``lanes`` and
   ``breakout_modes``; every mode parses the way sonic-config-engine's
   ``portconfig.BreakoutCfg`` parses it; the alias list matches the number of
-  child ports; two modes never collapse into the same parsed mode; the child
+  child ports; equivalent parsed modes use the same aliases; the child
   port names of one interface never collide with another interface.
 * every HWSKU (a subdirectory with a ``port_config.ini``):
 
@@ -232,8 +232,11 @@ class Platform:
                     continue
                 key = mode_key(entries)
                 if key in seen:
-                    self.report.error("%s: modes %r and %r are the same mode; sonic-config-engine resolves both to the first one" % (tag, seen[key], mode))
-                seen[key] = mode
+                    first = seen[key]
+                    if aliases[first] != list(alias_list):
+                        self.report.error("%s: equivalent modes %r and %r have different aliases; sonic-config-engine uses aliases from the first one" % (tag, first, mode))
+                else:
+                    seen[key] = mode
                 modes[mode] = entries
                 aliases[mode] = list(alias_list)
             if not modes:
@@ -272,8 +275,14 @@ class Platform:
         for name in self.interfaces:
             if name not in ifs:
                 continue
-            mode = self.resolve_mode(name, ifs[name]["default_brkout_mode"])
-            kids = self.children(name, mode)
+            requested = ifs[name]["default_brkout_mode"]
+            mode = self.resolve_mode(name, requested)
+            props = self.interfaces[name]
+            # BreakoutCfg resolves aliases by supported-speed equivalence,
+            # but keeps the default speed from the requested mode string.
+            kids = child_ports(name, props["lanes"], props["index"],
+                               props["aliases"][mode],
+                               parse_mode(requested, len(props["lanes"])))
             for child in kids:
                 if child in ifs:
                     for k, v in ifs[child].items():
