@@ -352,6 +352,7 @@ sudo LANG=C DEBIAN_FRONTEND=noninteractive chroot $FILESYSTEM_ROOT apt-get -y in
     usbutils                \
     pciutils                \
     ebtables                \
+    nftables                \
     linux-sysctl-defaults   \
     logrotate               \
     curl                    \
@@ -705,6 +706,7 @@ fi
 
 ## Setup ebtable rules (rule file in text format)
 sudo cp files/image_config/ebtables/ebtables.filter.cfg ${FILESYSTEM_ROOT}/etc
+sudo cp files/image_config/ebtables/bridge-nd-filter.nft ${FILESYSTEM_ROOT}/etc
 
 ## Debug Image specific changes
 ## Update motd for debug image
