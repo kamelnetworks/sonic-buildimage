@@ -232,7 +232,7 @@ def test_drawer_fru_refreshes_each_poll(bmc):
         assert fan.get_model() == 'R1241-F0001-01'
         assert fan.get_serial() == 'R1241F0001012A0021'
         bmc.clock.advance(60)
-    assert len(bmc.calls) == 6
+    assert len(bmc.calls) == 3
 
 
 def test_psu_replacement_between_polls_refreshes_direction(bmc):
@@ -257,13 +257,53 @@ def test_observed_removal_invalidates_newer_fru_reply(bmc):
     bmc.responses[presence] = ' 00'
     api().run_command(presence)
     bmc.clock.advance(2)
-    bmc.responses[fru] = 'old unit'
+    bmc.responses[fru] = ' Board Part Number : old unit'
     api().run_command(fru)
     bmc.clock.advance(1)
     bmc.responses[presence] = ' 01'
     api().run_command(presence)
-    bmc.responses[fru] = 'replacement'
-    assert api().run_command(fru) == (True, 'replacement')
+    bmc.responses[fru] = ' Board Part Number : replacement'
+    assert api().run_command(fru) == (True, ' Board Part Number : replacement')
+
+
+def test_fru_fields_share_one_record_without_extending_freshness(bmc):
+    record = 'ipmitool fru list 5'
+    bmc.responses[record] = (' Board Part Number : MODEL-A\n'
+                             ' Board Serial : SERIAL-A')
+    fan = fan_module.Fan(0, 0)
+    assert fan.get_model() == 'MODEL-A'
+    bmc.clock.advance(2)
+    assert fan.get_serial() == 'SERIAL-A'
+    assert bmc.calls == [record]
+    bmc.responses[record] = (' Board Part Number : MODEL-B\n'
+                             ' Board Serial : SERIAL-B')
+    bmc.clock.advance(1)
+    assert fan.get_serial() == 'SERIAL-B'
+    assert fan.get_model() == 'MODEL-B'
+    assert bmc.calls == [record, record]
+
+
+def test_missing_fru_field_does_not_hide_other_fields(bmc):
+    bmc.responses['ipmitool fru list 5'] = ' Board Serial : SERIAL-A'
+    fan = fan_module.Fan(0, 0)
+    assert fan.get_model() == fan_module.NOT_AVAILABLE
+    assert fan.get_serial() == 'SERIAL-A'
+    assert len(bmc.calls) == 1
+
+
+def test_fru_record_expiry_starts_before_slow_bmc_read(bmc):
+    record = 'ipmitool fru list 5'
+    bmc.responses[record] = ' Board Serial : SERIAL-A'
+    def slow_read(cmd):
+        result = bmc(cmd)
+        bmc.clock.advance(2)
+        return result
+    with patch.object(subprocess, 'getstatusoutput', slow_read):
+        assert fan_module.Fan(0, 0).get_serial() == 'SERIAL-A'
+        bmc.clock.advance(1)
+        bmc.responses[record] = ' Board Serial : SERIAL-B'
+        assert fan_module.Fan(0, 0).get_serial() == 'SERIAL-B'
+    assert bmc.calls == [record, record]
 
 
 def test_external_led_write_is_visible_immediately(bmc):

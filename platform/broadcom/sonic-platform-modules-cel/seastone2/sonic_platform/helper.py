@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import os
+import re
 import struct
 import subprocess
 import time
@@ -41,6 +42,9 @@ CACHE_TTLS = (
 )
 _cache = {}
 _presence_replies = {}
+_FRU_FIELD_COMMAND = re.compile(
+    r"^(ipmitool fru (?:list|print) [0-9]+) \| grep "
+    r"'(Board Part Number|Board Serial|Product Name|Product Serial)'\s*$")
 
 
 def clear_cache():
@@ -82,6 +86,20 @@ def run_ipmitool(cmd):
     Returns:
         (exit status, output) as subprocess.getstatusoutput does.
     """
+    # Inventory and airflow consumers select different fields from the same
+    # FRU. Cache the record, not each grep pipeline: otherwise model/serial
+    # alone read a drawer twice, pushing the rear fan past the freshness TTL.
+    # Restrict this to the literal field selectors used by this platform;
+    # arbitrary shell commands must retain their original semantics.
+    field_command = _FRU_FIELD_COMMAND.fullmatch(cmd)
+    if field_command:
+        record_cmd, field = field_command.groups()
+        ret, data = run_ipmitool(record_cmd)
+        if ret:
+            return ret, data
+        selected = '\n'.join(line for line in data.splitlines() if field in line)
+        return (0, selected) if selected else (1, '')
+
     key, ttl = _cache_key_and_ttl(cmd)
     if ttl is None:
         # A write (LED, threshold, power) or an unknown ipmitool command:
