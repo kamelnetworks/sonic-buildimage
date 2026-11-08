@@ -7,9 +7,11 @@ name: sonic-build
 # What it does:
 #   - Release builds always build vs, broadcom, and marvell-teralynx in
 #     parallel (matrix), requiring all three to succeed, the way the Azure Build
-#     stage did: full image (sonic-<platform>.bin) plus, when requested, the
-#     INSTALL_DEBUG_TOOLS=y image (sonic-<platform>-dbg.bin) whose side
-#     artifacts are the docker-*-dbg.gz debug docker images.
+#     stage did: full image (sonic-<platform>.bin) plus the INSTALL_DEBUG_TOOLS=y
+#     image (sonic-<platform>-dbg.bin) whose side artifacts are the
+#     docker-*-dbg.gz debug docker images. Release builds always build the
+#     debug image; non-release builds only when debug_image=true (#56: the
+#     debug pass is a second installer assembly, 25-95 min per platform).
 #   - Creates a GitHub release tagged build-<branch>-<run_number>, titled
 #     <branch>-v<run_number>, prerelease by default (like the Azure
 #     GitHubRelease@1 isPreRelease: true), with release notes
@@ -72,10 +74,10 @@ on:
         required: false
         default: 'vs'
       debug_image:
-        description: 'Also build the INSTALL_DEBUG_TOOLS=y image and docker-*-dbg.gz images'
+        description: 'Non-release builds only: also build the INSTALL_DEBUG_TOOLS=y image and docker-*-dbg.gz images. Releases always build them.'
         required: false
         type: boolean
-        default: true
+        default: false
       create_release:
         description: 'Publish <branch>-v<run_number> after all three full-image builds succeed (tag: build-<branch>-<run_number>)'
         required: false
@@ -94,13 +96,13 @@ on:
         description: 'SONIC_DPKG_CACHE_SOURCE host directory (persistent across pods on the runner PVC)'
         required: false
         default: '/var/cache/sonic/artifacts'
-      slave_cache:
-        description: 'Reuse/push the slave environment image via GHCR (saves ~35 min per pod when warm)'
+      compiler_cache:
+        description: 'Opt in to persistent ccache for C/C++ rebuilds (requires a writable package-cache source)'
         required: false
         type: boolean
-        default: true
-      slave_tar_cache:
-        description: 'Also keep a docker-save tar of the slave image on the persistent cache PVC and load it instead of pulling from GHCR (#56)'
+        default: false
+      slave_cache:
+        description: 'Reuse/push the slave environment image via GHCR (saves ~35 min per pod when warm)'
         required: false
         type: boolean
         default: true
@@ -392,6 +394,7 @@ jobs:
         env:
           CACHE_MODE_INPUT: ${{ inputs.cache_mode }}
           CACHE_SOURCE_INPUT: ${{ inputs.cache_source }}
+          COMPILER_CACHE_INPUT: ${{ inputs.compiler_cache }}
         run: |
           # Do not overwrite an existing local configuration.
           if [[ -e rules/config.user ]]; then
@@ -410,6 +413,16 @@ jobs:
               echo "SONIC_DPKG_CACHE_METHOD = $cache_mode"
               if [[ "$cache_mode" != none ]]; then
                 echo "SONIC_DPKG_CACHE_SOURCE = $CACHE_SOURCE_INPUT"
+              fi
+              if [[ "$COMPILER_CACHE_INPUT" == true && "$cache_mode" != none ]]; then
+                echo 'SONIC_CONFIG_USE_CCACHE = y'
+                # Makefile.work already mounts this persistent source as
+                # /dpkg_cache. Do not use target/ccache: target is cleaned at
+                # job start. override survives slave.mk's default assignment.
+                echo 'override CCACHE_DIR = /dpkg_cache/.ccache-$(shell id -u)/$(BLDENV)/$(CONFIGURED_ARCH)'
+                echo 'export CCACHE_MAXSIZE = 5G'
+              elif [[ "$COMPILER_CACHE_INPUT" == true ]]; then
+                echo '::warning::compiler cache disabled: persistent package cache is unavailable' >&2
               fi
               echo 'SONIC_BUILD_MEMORY = 28g'
               # The k8s release path's package concurrency: 2 concurrent
@@ -438,18 +451,7 @@ jobs:
         # pulled image to the local name:tag form the Makefile inspects and
         # pass SONIC_SLAVE_REUSE_*; the reuse tag equals the computed tag, so
         # Makefile.work's stale-tag guard passes by construction.
-        #
-        # The GHCR pull of the ~10 GB slave image took 7-8 min on every job
-        # (rc1 run 41798236605: downloads done after 2.7 min, layer extraction
-        # until 7.2 min). The dind image store lives on the per-pod ephemeral
-        # PVC, so nothing survives between pods except /var/cache/sonic. A
-        # docker-save tar of the image is kept there (slave-images/<tag>.tar,
-        # keyed by the same content-addressed tag) and loaded before falling
-        # back to GHCR (#56).
         if: ${{ inputs.slave_cache }}
-        env:
-          SLAVE_TAR_CACHE: ${{ inputs.slave_tar_cache }}
-          CACHE_SOURCE_INPUT: ${{ inputs.cache_source }}
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
@@ -466,40 +468,14 @@ jobs:
           ghcr_ref="ghcr.io/kamelnetworks/$img_tag"
           echo "slave base image: $img_tag (GHCR: $ghcr_ref)"
           echo "SLAVE_IMAGE_REF=$ghcr_ref" >> "$GITHUB_ENV"
-          # The tar directory sits next to the DPKG cache on the persistent
-          # PVC (cache_source is <pvc>/artifacts). Pods of one run share it.
-          tar_dir="$(dirname "$CACHE_SOURCE_INPUT")/slave-images"
-          tar_file="$tar_dir/${name//\//_}-$tag.tar"
-          echo "SLAVE_TAR_FILE=$tar_file" >> "$GITHUB_ENV"
-          echo "SLAVE_TAR_SAVED=false" >> "$GITHUB_ENV"
-          reused=false
-          if [[ "$SLAVE_TAR_CACHE" == true && -s "$tar_file" ]]; then
-            echo "loading slave image from $tar_file ($(du -h "$tar_file" | cut -f1))"
-            SECONDS=0
-            if docker load -i "$tar_file" && docker image inspect "$img_tag" >/dev/null 2>&1; then
-              echo "slave image loaded from the cache tar in ${SECONDS}s"
-              echo "SLAVE_TAR_SAVED=true" >> "$GITHUB_ENV"
-              reused=true
-            else
-              echo "::warning::docker load of $tar_file failed after ${SECONDS}s; falling back to GHCR"
-              docker image rm -f "$img_tag" >/dev/null 2>&1 || true
-            fi
-          fi
-          if [[ "$reused" == false ]]; then
-            SECONDS=0
-            if docker pull "$ghcr_ref"; then
-              echo "slave image pulled from GHCR in ${SECONDS}s"
-              docker tag "$ghcr_ref" "$img_tag"
-              reused=true
-            fi
-          fi
-          if [[ "$reused" == true ]]; then
+          if docker pull "$ghcr_ref"; then
+            docker tag "$ghcr_ref" "$img_tag"
             opts="$BUILD_OPTS SONIC_SLAVE_REUSE_SLAVE=y"
             opts="$opts SONIC_SLAVE_REUSE_TRIXIE_IMAGE=$name"
             opts="$opts SONIC_SLAVE_REUSE_TRIXIE_TAG=$tag"
             echo "BUILD_OPTS=$opts" >> "$GITHUB_ENV"
             echo "SLAVE_REUSED=true" >> "$GITHUB_ENV"
-            echo "slave image reused"
+            echo "slave image reused from GHCR"
           else
             echo "SLAVE_REUSED=false" >> "$GITHUB_ENV"
             echo "no cached slave image; the build will produce one"
@@ -542,43 +518,13 @@ jobs:
             echo "::warning::slave image $local_ref not found to push"
           fi
 
-      - name: Save slave image tar to the cache PVC (for the next pod)
-        # After Configure the image exists locally whether it was loaded,
-        # pulled or built. Write it once per tag, atomically (three matrix
-        # jobs may race for the same tag), and keep only the two newest tars
-        # so the PVC does not fill up with ~10 GB per slave revision.
-        if: ${{ inputs.slave_cache && inputs.slave_tar_cache && env.SLAVE_TAR_SAVED == 'false' && success() }}
-        run: |
-          local_ref=${SLAVE_IMAGE_REF#ghcr.io/kamelnetworks/}
-          if ! docker image inspect "$local_ref" >/dev/null 2>&1; then
-            echo "::warning::slave image $local_ref not found; not saving a tar"
-            exit 0
-          fi
-          tar_dir=$(dirname "$SLAVE_TAR_FILE")
-          mkdir -p "$tar_dir"
-          df -h "$tar_dir" | tail -1
-          SECONDS=0
-          tmp="$SLAVE_TAR_FILE.tmp.$RUNNER_NAME.$$"
-          if docker save -o "$tmp" "$local_ref"; then
-            if [[ -s "$SLAVE_TAR_FILE" ]]; then
-              echo "another job saved $SLAVE_TAR_FILE first"
-              rm -f "$tmp"
-            else
-              mv -f "$tmp" "$SLAVE_TAR_FILE"
-              echo "saved $SLAVE_TAR_FILE ($(du -h "$SLAVE_TAR_FILE" | cut -f1)) in ${SECONDS}s"
-            fi
-          else
-            echo "::warning::docker save failed after ${SECONDS}s"
-            rm -f "$tmp"
-          fi
-          # Newest two by mtime stay; the current tag is among them.
-          ls -1t "$tar_dir"/*.tar 2>/dev/null | tail -n +3 | xargs -r rm -fv
-          ls -la "$tar_dir"
-
       - name: Build (debug-tools image + docker-*-dbg.gz)
         # Only for full-image builds; a targets override replaces the whole
-        # build, like tools/kubernetes/build.sh does.
-        if: ${{ inputs.debug_image && inputs.targets == '' }}
+        # build, like tools/kubernetes/build.sh does. Releases always build
+        # the debug image (its docker-*-dbg.gz are release assets); other
+        # dispatches only on request, since this pass assembles a second
+        # installer (#56).
+        if: ${{ (inputs.debug_image || inputs.create_release) && inputs.targets == '' }}
         run: |
           make NOBOOKWORM=1 $BUILD_OPTS INSTALL_DEBUG_TOOLS=y target/sonic-$MATRIX_PLATFORM.bin
           mv target/sonic-$MATRIX_PLATFORM.bin target/sonic-$MATRIX_PLATFORM-dbg.bin
@@ -595,6 +541,14 @@ jobs:
         run: |
           # Intentional word splitting: TARGETS_INPUT is a make-target list.
           make NOBOOKWORM=1 $BUILD_OPTS $TARGETS_INPUT
+
+      - name: Compiler cache statistics
+        if: ${{ success() && inputs.compiler_cache }}
+        run: |
+          echo 'Compiler cache statistics are cumulative across jobs sharing this directory.'
+          if grep -Eq '^SONIC_CONFIG_USE_CCACHE = y$' rules/config.user; then
+            make NOBOOKWORM=1 $BUILD_OPTS ccache-stats || echo '::warning::could not read compiler-cache statistics'
+          fi
 
       - name: Check dirty version
         # Only meaningful after a build; skip when an earlier step failed.
