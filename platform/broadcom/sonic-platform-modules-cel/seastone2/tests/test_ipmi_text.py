@@ -134,13 +134,24 @@ class FakeIpmitool:
         self.calls.append(cmd)
         if cmd in self.responses:
             return 0, self.responses[cmd]
+        # A full FRU read contains all the configured field replies. Keep
+        # existing consumer cases readable while exercising record selection.
+        if cmd.startswith('ipmitool fru ') and '|' not in cmd:
+            fields = [value for key, value in self.responses.items()
+                      if key.startswith(cmd + " | grep '")]
+            if fields:
+                return 0, '\n'.join(fields)
         return 1, 'Unable to send RAW command (channel=0x0 netfn=0x3a lun=0x0 cmd=0x3 rsp=0xcc): Invalid data field in request'
 
 
 @pytest.fixture
 def ipmi():
+    """A fake BMC, with the helper's reply cache (#163, test_helper_cache.py)
+    switched off: these tests change replies between calls."""
     fake = FakeIpmitool()
-    with patch.object(subprocess, 'getstatusoutput', fake):
+    helper.clear_cache()
+    with patch.object(subprocess, 'getstatusoutput', fake), \
+            patch.object(helper, 'CACHE_TTLS', ()):
         yield fake
 
 
