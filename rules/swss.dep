@@ -10,3 +10,10 @@ $(SWSS)_DEP_FLAGS   := $(SONIC_COMMON_FLAGS_LIST) ENABLE_ASAN=$(ENABLE_ASAN) ENA
 $(SWSS)_DEP_FILES   := $(DEP_FILES)
 $(SWSS)_SMDEP_FILES := $(SMDEP_FILES)
 $(SWSS)_SMDEP_PATHS := $(SPATH)
+
+# Measurement branch only: force real SWSS package builds in both CI runs.
+# Preserve prerequisite rwcache and never read or overwrite shared SWSS debs.
+$(SWSS)_CACHE_OVERRIDE := none
+# Isolate the matched cold/warm experiment without deleting any shared cache.
+# This late override follows config.user and slave.mk's default directory.
+override CCACHE_DIR = /dpkg_cache/.ccache-measure-56-284f1532-$(shell id -u)/$(BLDENV)/$(CONFIGURED_ARCH)
