@@ -26,7 +26,8 @@ HOST_CHK_CMD = "docker > /dev/null 2>&1"
 # FRU data determines airflow as well as inventory: it must expire even if a
 # replacement happens between presence polls. LED reads bypass the cache so
 # changes made by another process are visible. Thresholds describe BMC sensors.
-# Writes invalidate this process's cache only, not other daemon processes.
+# LED writes leave unrelated readings intact. Other writes invalidate this
+# process's cache only, not other daemon processes.
 CACHE_TTL_READ = 3
 CACHE_TTL_STATIC = 300
 # (lower-cased command prefix, TTL)
@@ -45,6 +46,9 @@ _presence_replies = {}
 _FRU_FIELD_COMMAND = re.compile(
     r"^(ipmitool fru (?:list|print) [0-9]+) \| grep "
     r"'(Board Part Number|Board Serial|Product Name|Product Serial)'\s*$")
+_FAN_LED_WRITE = re.compile(r'^ipmitool raw 0x3a 0x0a [4-7] [0-2]$')
+_SYSTEM_LED_WRITE = re.compile(
+    r'^ipmitool raw 0x3a 0x0c 0x00 0x03 0x62 (?:0x10|0x11|0x20|0x33)$')
 
 
 def clear_cache():
@@ -101,10 +105,15 @@ def run_ipmitool(cmd):
         return (0, selected) if selected else (1, '')
 
     key, ttl = _cache_key_and_ttl(cmd)
-    if ttl is None:
-        # A write (LED, threshold, power) or an unknown ipmitool command:
+    if ttl is None and not (_FAN_LED_WRITE.fullmatch(key) or
+                            _SYSTEM_LED_WRITE.fullmatch(key)):
+        # A threshold/power write or an unknown ipmitool command:
         # whatever is cached may describe the state before it.
         _cache.clear()
+    # Known LED-only writes do not change sensors or FRU records. In
+    # particular, cold thermalctld sets each drawer LED twice; clearing these
+    # unrelated readings forces another set of serialized BMC requests.
+    # LED reads themselves are uncached, so no stale LED state survives.
     if not ttl:
         return subprocess.getstatusoutput(cmd)
 

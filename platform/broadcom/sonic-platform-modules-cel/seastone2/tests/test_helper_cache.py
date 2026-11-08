@@ -107,7 +107,7 @@ def test_a_failure_is_retried_after_the_read_ttl(bmc):
     assert len(bmc.calls) == 2
 
 
-def test_writes_are_never_cached_and_drop_the_cache(bmc):
+def test_led_writes_are_never_cached(bmc):
     fan = fan_module.Fan(1, 0)
     bmc.responses[FAN_LED_CMD.format(fan._fan_led_offset)] = ' 01'
     assert fan.get_status_led() == 'amber'
@@ -123,7 +123,7 @@ def test_writes_are_never_cached_and_drop_the_cache(bmc):
                          FAN_LED_CMD.format(fan._fan_led_offset)]
 
 
-def test_system_led_and_threshold_writes_drop_the_cache(bmc):
+def test_system_led_is_fresh_and_threshold_writes_drop_the_cache(bmc):
     chassis = chassis_module.Chassis.__new__(chassis_module.Chassis)
     chassis._api_helper = api()
     bmc.responses[SYS_LED_CMD] = ' 10'
@@ -142,6 +142,40 @@ def test_system_led_and_threshold_writes_drop_the_cache(bmc):
     assert thermal.set_high_threshold(60.0) is True
     bmc.responses[SENSOR_THRESH_CMD.format('0x01')] = ' 38 00 00 00 3c 3f 46'
     assert thermal.get_high_threshold() == 60.0
+
+
+@pytest.mark.parametrize('write', (
+    'ipmitool raw 0x3a 0x0a 4 2',
+    'ipmitool raw 0x3a 0x0c 0x00 0x03 0x62 0x20',
+))
+def test_led_writes_preserve_unrelated_fresh_readings(bmc, write):
+    presence = PRESENCE_CMD.format(0)
+    fru = 'ipmitool fru list 5'
+    bmc.responses.update({presence: ' 00', fru: ' Board Serial : A', write: ''})
+    assert api().run_command(presence) == (True, ' 00')
+    assert api().run_command(fru) == (True, ' Board Serial : A')
+    assert api().run_command(write) == (True, '')
+    assert api().run_command(presence) == (True, ' 00')
+    assert api().run_command(fru) == (True, ' Board Serial : A')
+    assert bmc.calls == [presence, fru, write]
+    bmc.clock.advance(3)
+    bmc.responses.update({presence: ' 01', fru: ' Board Serial : B'})
+    assert api().run_command(presence) == (True, ' 01')
+    assert api().run_command(fru) == (True, ' Board Serial : B')
+
+
+@pytest.mark.parametrize('write', (
+    'ipmitool raw 0x3a 0x0a 4 3',
+    'ipmitool raw 0x3a 0x0a 4 2 extra',
+    'ipmitool raw 0x3a 0x0c 0x00 0x03 0x61 0x20',
+))
+def test_unknown_writes_still_invalidate_readings(bmc, write):
+    cmd = PRESENCE_CMD.format(0)
+    bmc.responses.update({cmd: ' 00', write: ''})
+    api().run_command(cmd)
+    api().run_command(write)
+    bmc.responses[cmd] = ' 01'
+    assert api().run_command(cmd) == (True, ' 01')
 
 
 def test_unknown_ipmitool_commands_are_not_cached(bmc):
