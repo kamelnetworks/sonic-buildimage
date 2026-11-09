@@ -28,6 +28,32 @@
             }
         }
     },
+    "VLAN_MTU_MAX": {
+        "sonic-vlan:sonic-vlan": {
+            "sonic-vlan:VLAN": {
+                "VLAN_LIST": [
+                    {
+                        "admin_status": "up",
+                        "mtu": "9100",
+                        "name": "Vlan100"
+                    }
+                ]
+            }
+        }
+    },
+    "VLAN_MTU_ABOVE_BRIDGE": {
+        "sonic-vlan:sonic-vlan": {
+            "sonic-vlan:VLAN": {
+                "VLAN_LIST": [
+                    {
+                        "admin_status": "up",
+                        "mtu": "9101",
+                        "name": "Vlan100"
+                    }
+                ]
+            }
+        }
+    },
     "INCORRECT_VLAN_NAME": {
         "sonic-vlan:sonic-vlan": {
             "sonic-vlan:VLAN": {
@@ -72,7 +98,7 @@
                         "dhcp_servers": [
                             "10.186.72.566"
                         ],
-                        "mtu": "9216",
+                        "mtu": "9100",
                         "name": "Vlan100"
                     }
                 ]
@@ -89,7 +115,7 @@
                         "dhcpv6_servers": [
                             "2001:1:2"
                         ],
-                        "mtu": "9216",
+                        "mtu": "9100",
                         "name": "Vlan500"
                     }
                 ]
@@ -625,7 +651,7 @@
                         "dhcp_servers": [
                             "10.186.72.10"
                         ],
-                        "mtu": "9216",
+                        "mtu": "9100",
                         "name": "Vlan300"
                     }
                 ]
@@ -682,7 +708,7 @@
                         "dhcpv6_servers": [
                             "2001:1::2"
                         ],
-                        "mtu": "9216",
+                        "mtu": "9100",
                         "name": "Vlan400"
                     }
                 ]
