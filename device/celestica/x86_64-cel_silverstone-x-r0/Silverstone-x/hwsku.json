@@ -1,0 +1,174 @@
+{
+    "interfaces": {
+        "Ethernet0": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet8": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet16": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet24": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet32": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet40": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet48": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet56": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet64": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet72": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet80": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet88": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet96": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet104": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet112": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet120": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet128": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet136": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet144": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet152": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet160": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet168": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet176": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet184": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet192": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet200": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet208": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet216": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet224": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet232": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet240": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet248": {
+            "default_brkout_mode": "1x400G[200G]",
+            "fec": "rs",
+            "mtu": "9126"
+        },
+        "Ethernet256": {
+            "default_brkout_mode": "1x10G",
+            "mtu": "9126",
+            "fec": "none"
+        },
+        "Ethernet257": {
+            "default_brkout_mode": "1x10G",
+            "mtu": "9126",
+            "fec": "none"
+        }
+    }
+}
