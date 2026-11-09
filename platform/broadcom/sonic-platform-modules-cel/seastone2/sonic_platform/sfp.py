@@ -128,6 +128,8 @@ class Sfp(SfpOptoeBase):
         Returns:
             A boolean, True if lpmode is set successfully, False if not
         """
+        if self.sfp_type != QSFP_TYPE:
+            return False
 
         try:
             reg_file = open(
@@ -150,9 +152,13 @@ class Sfp(SfpOptoeBase):
         Returns:
             A Boolean, True if lpmode is enabled, False if disabled
         """
+        if self.sfp_type != QSFP_TYPE:
+            return False
 
         reg_status = self._api_helper.read_one_line_file(
             "/".join([PORT_INFO_PATH, self.port_name, "qsfp_lpmode"]))
+        if reg_status is None:
+            return False
 
         return (int(reg_status) == 1)
 
