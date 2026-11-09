@@ -1,0 +1,295 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Christian Svensson <blue@cmd.nu>
+Date: Mon, 9 Nov 2026 22:52:37 +0000
+Subject: [PATCH] config interface breakout: new ports inherit mtu and fec
+
+The ports that 'config interface breakout' adds get the highest mtu of the
+ports it deletes, and the fec of the first deleted port (in lane order)
+whose fec is set and not 'none'. Without an active fec on any deleted port,
+a new port keeps the fec from platform.json (rs for 50G+ per lane) or gets
+'none'. Without an mtu on any deleted port, the new ports get no mtu.
+
+kamelnetworks/sonic-buildimage#197
+---
+ config/config_mgmt.py            |  53 ++++++++
+ tests/config_dpb_inherit_test.py | 200 +++++++++++++++++++++++++++++++
+ 2 files changed, 253 insertions(+)
+ create mode 100644 tests/config_dpb_inherit_test.py
+
+diff --git a/config/config_mgmt.py b/config/config_mgmt.py
+index b16ffd89..383b1960 100644
+--- a/config/config_mgmt.py
++++ b/config/config_mgmt.py
+@@ -428,6 +428,10 @@ class ConfigMgmtDPB(ConfigMgmt):
+         '''
+         MAX_WAIT = 60
+         try:
++            # new ports inherit mtu and fec of the ports they replace, read
++            # them from the data tree before the old ports are deleted.
++            portJson = self._inheritPortAttrs(delPorts=delPorts, \
++                portJson=portJson)
+             # delete Port and get the Config diff, deps and True/False
+             delConfigToLoad, deps, ret = self._deletePorts(ports=delPorts, \
+                 force=force)
+@@ -465,6 +469,55 @@ class ConfigMgmtDPB(ConfigMgmt):
+ 
+         return None, True
+ 
++    def _inheritPortAttrs(self, delPorts=list(), portJson=dict()):
++        '''
++        Copy mtu and fec of the ports being deleted to the ports being added.
++        The new ports get the highest mtu of the old ports, and the fec of the
++        first old port (in lane order) whose fec is active, i.e. set and not
++        'none'. If no old port had an active fec, a new port keeps the fec
++        that platform.json gives it (rs for 50G+ per lane), else gets 'none'.
++        Without an mtu on any old port, the new ports get no mtu (default).
++
++        Parameters:
++            delPorts (list): ports to be deleted.
++            portJson (dict): Config DB json Part of all Ports, generated from
++                platform.json.
++
++        Returns:
++            portJson (dict): copy of portJson with mtu and fec set.
++        '''
++        oldPorts = self.sy.getData().get('PORT', dict())
++        old = [oldPorts[port] for port in delPorts if port in oldPorts]
++
++        def _firstLane(entry):
++            try:
++                return int(str(entry.get('lanes', '')).split(',')[0])
++            except ValueError:
++                return 0
++        old.sort(key=_firstLane)
++
++        mtus = [int(entry['mtu']) for entry in old if entry.get('mtu')]
++        mtu = str(max(mtus)) if mtus else None
++        fecs = [entry['fec'] for entry in old \
++            if entry.get('fec') and entry['fec'] != 'none']
++        fec = fecs[0] if fecs else None
++
++        newJson = dict(portJson)
++        newJson['PORT'] = dict()
++        for port, entry in portJson['PORT'].items():
++            entry = dict(entry)
++            if mtu is not None:
++                entry['mtu'] = mtu
++            if fec is not None:
++                entry['fec'] = fec
++            elif not entry.get('fec'):
++                entry['fec'] = 'none'
++            newJson['PORT'][port] = entry
++        self.sysLog(doPrint=True, msg='Ports {} inherit mtu {} fec {} from {}'.\
++            format(list(newJson['PORT'].keys()), mtu, fec, delPorts))
++
++        return newJson
++
+     def _deletePorts(self, ports=list(), force=False):
+         '''
+         Delete ports and dependencies from data tree, validate and return resultant
+diff --git a/tests/config_dpb_inherit_test.py b/tests/config_dpb_inherit_test.py
+new file mode 100644
+index 00000000..3c93d4d2
+--- /dev/null
++++ b/tests/config_dpb_inherit_test.py
+@@ -0,0 +1,200 @@
++'''
++Dynamic Port Breakout: the ports that breakOutPort() adds inherit mtu and fec
++from the ports it deletes. The highest mtu of the old ports wins, and the fec
++of the first old port (in lane order) whose fec is set and not 'none'. Without
++an active fec on any old port, a new port keeps the fec from platform.json
++(rs for 50G+ per lane) or gets 'none'.
++'''
++import json
++import os
++from copy import deepcopy
++from unittest import mock
++
++import pytest
++from utilities_common.general import load_module_from_source
++
++from .utils import worker_tmp_path
++
++config_mgmt_py_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'config_mgmt.py')
++config_mgmt = load_module_from_source('config_mgmt', config_mgmt_py_path)
++
++
++def port(alias, lanes, speed, **attrs):
++    entry = {'alias': alias, 'lanes': lanes, 'speed': speed, 'admin_status': 'up'}
++    entry.update(attrs)
++    return entry
++
++
++def child_ports(first, lanes, speed, per_port, fec=None):
++    '''platform.json child rows, as portconfig.get_child_ports() returns them.'''
++    ports = {}
++    for i in range(0, len(lanes), per_port):
++        entry = {'alias': 'Eth{}'.format(first + i), 'speed': speed,
++                 'lanes': ','.join(str(lane) for lane in lanes[i:i + per_port])}
++        if fec:
++            entry['fec'] = fec
++        ports['Ethernet{}'.format(first + i)] = entry
++    return {'PORT': ports}
++
++
++def base_config(ports):
++    # Ethernet100 stays, and must not be changed by the breakout.
++    ports = deepcopy(ports)
++    ports['Ethernet100'] = port('Eth26', '125,126,127,128', '100000', mtu='1500', fec='fc')
++    return {
++        'BREAKOUT_CFG': {'Ethernet0': {'brkout_mode': 'x'}, 'Ethernet8': {'brkout_mode': 'x'}},
++        'PORT': ports,
++    }
++
++
++def dpb(config, default_config=None):
++    config_mgmt.CONFIG_DB_JSON_FILE = worker_tmp_path('dpbInheritConfigDb.json')
++    config_mgmt.DEFAULT_CONFIG_DB_JSON_FILE = worker_tmp_path('dpbInheritDefaultConfigDb.json')
++    with open(config_mgmt.CONFIG_DB_JSON_FILE, 'w') as f:
++        json.dump(config, f)
++    with open(config_mgmt.DEFAULT_CONFIG_DB_JSON_FILE, 'w') as f:
++        json.dump(default_config or {}, f)
++    cmdpb = config_mgmt.ConfigMgmtDPB(source=config_mgmt.CONFIG_DB_JSON_FILE)
++    cmdpb.writeConfigDB = mock.MagicMock(return_value=True)
++    cmdpb._verifyAsicDB = mock.MagicMock(return_value=True)
++    return cmdpb
++
++
++def break_out(cmdpb, delPorts, portJson, force=False, loadDefConfig=False):
++    with mock.patch.object(config_mgmt, 'SonicV2Connector'), \
++            mock.patch.object(config_mgmt.port_util, 'get_interface_oid_map',
++                              return_value=({}, {})):
++        return cmdpb.breakOutPort(delPorts=delPorts, portJson=portJson,
++                                  force=force, loadDefConfig=loadDefConfig)
++
++
++def added_ports(cmdpb):
++    # writeConfigDB calls: shutdown, deletion diff, addition diff
++    assert cmdpb.writeConfigDB.call_count == 3
++    added = cmdpb.writeConfigDB.call_args_list[2][0][0]['PORT']
++    assert 'Ethernet100' not in added
++    return added
++
++
++class TestDpbInheritMtuFec(object):
++    def test_1x100G_to_4x25G_inherits_parent(self):
++        cmdpb = dpb(base_config({
++            'Ethernet8': port('Eth3', '73,74,75,76', '100000', mtu='9216', fec='rs'),
++        }))
++        portJson = child_ports(8, [73, 74, 75, 76], '25000', 1)
++        original = deepcopy(portJson)
++
++        deps, ret = break_out(cmdpb, ['Ethernet8'], portJson)
++
++        assert ret is True and deps is None
++        added = added_ports(cmdpb)
++        assert sorted(added) == ['Ethernet10', 'Ethernet11', 'Ethernet8', 'Ethernet9']
++        for name, entry in added.items():
++            assert entry['mtu'] == '9216', name
++            assert entry['fec'] == 'rs', name
++            assert entry['speed'] == '25000', name
++        # the caller's portJson is not changed
++        assert portJson == original
++
++    def test_4x25G_to_1x100G_highest_mtu_first_active_fec_in_lane_order(self):
++        cmdpb = dpb(base_config({
++            'Ethernet8': port('Eth3/1', '73', '25000', mtu='1500', fec='none'),
++            'Ethernet9': port('Eth3/2', '74', '25000', mtu='9216'),
++            'Ethernet10': port('Eth3/3', '75', '25000', mtu='9100', fec='rs'),
++            'Ethernet11': port('Eth3/4', '76', '25000', fec='fc'),
++        }))
++        portJson = child_ports(8, [73, 74, 75, 76], '100000', 4)
++
++        # delPorts in reverse: lane order decides, not the argument order
++        deps, ret = break_out(cmdpb, ['Ethernet11', 'Ethernet10', 'Ethernet9', 'Ethernet8'],
++                              portJson)
++
++        assert ret is True
++        added = added_ports(cmdpb)
++        assert list(added) == ['Ethernet8']
++        assert added['Ethernet8']['mtu'] == '9216'
++        assert added['Ethernet8']['fec'] == 'rs'
++
++    def test_nothing_set_gives_no_mtu_and_fec_none(self):
++        cmdpb = dpb(base_config({
++            'Ethernet8': port('Eth3', '73,74,75,76', '100000'),
++        }))
++        deps, ret = break_out(cmdpb, ['Ethernet8'], child_ports(8, [73, 74, 75, 76], '25000', 1))
++
++        assert ret is True
++        for name, entry in added_ports(cmdpb).items():
++            assert 'mtu' not in entry, name
++            assert entry['fec'] == 'none', name
++
++    def test_explicit_fec_none_is_kept(self):
++        cmdpb = dpb(base_config({
++            'Ethernet8': port('Eth3/1', '73', '25000', fec='none'),
++            'Ethernet9': port('Eth3/2', '74', '25000', fec='none'),
++            'Ethernet10': port('Eth3/3', '75', '25000'),
++            'Ethernet11': port('Eth3/4', '76', '25000', mtu='9100'),
++        }))
++        deps, ret = break_out(cmdpb, ['Ethernet8', 'Ethernet9', 'Ethernet10', 'Ethernet11'],
++                              child_ports(8, [73, 74, 75, 76], '100000', 4))
++
++        assert ret is True
++        assert added_ports(cmdpb)['Ethernet8'] == {
++            'alias': 'Eth8', 'speed': '100000', 'lanes': '73,74,75,76',
++            'mtu': '9100', 'fec': 'none'}
++
++    def test_400G_to_4x100G_silverstone_x(self):
++        # Teralynx 7: 400G on 8x50G PAM4 lanes, 4x100G on 2 lanes each.
++        # platform.json gives the children fec rs (50G per lane).
++        lanes = list(range(1, 9))
++        cmdpb = dpb(base_config({
++            'Ethernet0': port('Eth1', '1,2,3,4,5,6,7,8', '400000', mtu='9100', fec='rs'),
++        }))
++        deps, ret = break_out(cmdpb, ['Ethernet0'], child_ports(0, lanes, '100000', 2, fec='rs'))
++
++        assert ret is True
++        added = added_ports(cmdpb)
++        assert sorted(added) == ['Ethernet0', 'Ethernet2', 'Ethernet4', 'Ethernet6']
++        for name, entry in added.items():
++            assert (entry['mtu'], entry['fec'], entry['speed']) == ('9100', 'rs', '100000'), name
++
++    def test_4x100G_to_400G_keeps_platform_fec_without_active_fec(self):
++        # 'none' on the old ports is not active, and does not override the
++        # rs that platform.json sets for 50G per lane.
++        cmdpb = dpb(base_config({
++            'Ethernet0': port('Eth1/1', '1,2', '100000', fec='none'),
++            'Ethernet2': port('Eth1/2', '3,4', '100000'),
++            'Ethernet4': port('Eth1/3', '5,6', '100000', mtu='9216'),
++            'Ethernet6': port('Eth1/4', '7,8', '100000'),
++        }))
++        deps, ret = break_out(cmdpb, ['Ethernet0', 'Ethernet2', 'Ethernet4', 'Ethernet6'],
++                              child_ports(0, list(range(1, 9)), '400000', 8, fec='rs'))
++
++        assert ret is True
++        entry = added_ports(cmdpb)['Ethernet0']
++        assert (entry['mtu'], entry['fec'], entry['speed']) == ('9216', 'rs', '400000')
++
++    def test_force_and_default_config(self):
++        # -f deletes the ACL binding, -l merges the default config for the
++        # new ports; the inherited mtu/fec take priority over its PORT fields.
++        config = base_config({
++            'Ethernet8': port('Eth3', '73,74,75,76', '100000', mtu='9216', fec='rs'),
++        })
++        config['ACL_TABLE'] = {'ACL1': {'policy_desc': 'ACL1', 'type': 'L3',
++                                        'stage': 'INGRESS', 'ports': ['Ethernet8']}}
++        default = {
++            'PORT': {'Ethernet8': {'mtu': '1500', 'fec': 'none', 'description': 'def8'}},
++            'ACL_TABLE': {'ACL1': {'ports': ['Ethernet9']}},
++        }
++        cmdpb = dpb(config, default)
++        portJson = child_ports(8, [73, 74, 75, 76], '25000', 1)
++
++        deps, ret = break_out(cmdpb, ['Ethernet8'], portJson)
++        assert ret is False and deps
++        assert cmdpb.writeConfigDB.call_count == 0
++
++        deps, ret = break_out(cmdpb, ['Ethernet8'], portJson, force=True, loadDefConfig=True)
++        assert ret is True
++        add = cmdpb.writeConfigDB.call_args_list[2][0][0]
++        for name, entry in add['PORT'].items():
++            assert (entry['mtu'], entry['fec']) == ('9216', 'rs'), name
++        assert add['PORT']['Ethernet8']['description'] == 'def8'
++        assert add['ACL_TABLE']['ACL1']['ports'] == ['Ethernet9']

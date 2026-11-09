@@ -14,3 +14,13 @@ not infer ASIC state or a capacity/failure diagnosis from missing tunnel state.
 The carried CLI tests cover multiple VNIs, IPv6, namespace isolation and
 empty/deleted/partial records. Keep it alongside the ACL patch and any
 independently approved NTP patch when resolving series conflicts.
+
+0005 makes the ports that 'config interface breakout' creates inherit mtu
+and fec from the ports they replace, as decided on #197: the highest mtu of
+the old ports, and the fec of the first old port in lane order whose fec is
+set and not 'none'. Without an active fec, a new port keeps the fec that
+platform.json gives it (rs for 50G+ per lane) or gets 'none'; without an mtu
+on any old port, no mtu is written. admin_status, description,
+dhcp_rate_limit and SFLOW_SESSION are not inherited (follow-ups on #197).
+The patch is independent of 0004 (#136); keep both when resolving series
+conflicts.
