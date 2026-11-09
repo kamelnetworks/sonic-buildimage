@@ -1,0 +1,135 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Christian Svensson <blue@cmd.nu>
+Date: Mon, 9 Nov 2026 18:56:37 +0000
+Subject: [PATCH] [sonic_xcvr] Use the SFF-8472 API for DWDM-SFP/SFP+
+ (identifier 0x0B)
+
+XcvrApiFactory had no API for identifier 0x0B, so get_transceiver_info()
+returned None for DWDM SFP+ optics such as the HUA-SFP-10G-DWDM1A.
+sfputil showed no EEPROM data and xcvrd left TRANSCEIVER_INFO and the
+DOM tables empty for the port. These modules keep the SFP serial ID
+layout and implement SFF-8472 DDM, which the API reads only when byte 92
+advertises it. The legacy sonic_sfp/sfputilbase already treats 0x0B as
+an SFP.
+
+Refs: kamelnetworks/sonic-buildimage#22
+---
+ .../sonic_xcvr/xcvr_api_factory.py            |  5 ++
+ tests/sonic_xcvr/test_xcvr_api_factory.py     | 69 ++++++++++++++++++-
+ 2 files changed, 73 insertions(+), 1 deletion(-)
+
+diff --git a/sonic_platform_base/sonic_xcvr/xcvr_api_factory.py b/sonic_platform_base/sonic_xcvr/xcvr_api_factory.py
+index 4bc1cf7..640b949 100644
+--- a/sonic_platform_base/sonic_xcvr/xcvr_api_factory.py
++++ b/sonic_platform_base/sonic_xcvr/xcvr_api_factory.py
+@@ -102,6 +102,11 @@ class XcvrApiFactory(object):
+         # Instantiate various Optics implementation based upon their respective ID as per SFF8024
+         id_mapping = {
+             0x03: (self._create_api, (Sff8472Codes, Sff8472MemMap, Sff8472Api)),
++            # DWDM-SFP/SFP+ "not using SFF-8472": in practice these modules
++            # (e.g. HUA-SFP-10G-DWDM1A) keep the SFP serial ID layout and
++            # usually implement SFF-8472 DDM, which the API reads only if
++            # advertised. Treat them like 0x03, as sonic_sfp/sfputilbase does.
++            0x0B: (self._create_api, (Sff8472Codes, Sff8472MemMap, Sff8472Api)),
+             0x0D: (self._create_qsfp_api, ()),
+             0x11: (self._create_api, (Sff8636Codes, Sff8636MemMap, Sff8636Api)),
+             0x18: (self._create_cmis_api, (bank,)),
+diff --git a/tests/sonic_xcvr/test_xcvr_api_factory.py b/tests/sonic_xcvr/test_xcvr_api_factory.py
+index 3d737ff..27802d1 100644
+--- a/tests/sonic_xcvr/test_xcvr_api_factory.py
++++ b/tests/sonic_xcvr/test_xcvr_api_factory.py
+@@ -13,6 +13,7 @@ from sonic_platform_base.sonic_xcvr.fields import consts
+ from sonic_platform_base.sonic_xcvr.xcvr_api_factory import XcvrApiFactory
+ from sonic_platform_base.sonic_xcvr.api.public.sff8636 import Sff8636Api
+ from sonic_platform_base.sonic_xcvr.api.public.sff8436 import Sff8436Api
++from sonic_platform_base.sonic_xcvr.api.public.sff8472 import Sff8472Api
+ 
+ def mock_reader_sff8636(start, length):
+     return bytes([0x0d]) if start == 0 else bytes ([0x06])
+@@ -23,6 +24,15 @@ def mock_reader_sff8436(start, length):
+ def mock_reader_cmis(start, length):
+     return bytes([0x18])
+ 
++def mock_reader_sfp(start, length):
++    return bytes([0x03])
++
++def mock_reader_dwdm_sfp(start, length):
++    return bytes([0x0b])
++
++def mock_reader_unknown(start, length):
++    return bytes([0x0c])
++
+ class TestXcvrApiFactory(object):
+     @patch('sonic_platform_base.sonic_xcvr.eeprom_rw.ModuleEepromLowerMemoryInfo.get_vendor_name', MagicMock(return_value='Credo'))
+     @patch('sonic_platform_base.sonic_xcvr.eeprom_rw.ModuleEepromLowerMemoryInfo.get_vendor_part_num', MagicMock(return_value='CAC81X321M2MC1MS'))
+@@ -50,6 +60,15 @@ class TestXcvrApiFactory(object):
+         api = XcvrApiFactory(reader, MagicMock()).create_xcvr_api()
+         assert isinstance(api, expected_api)
+ 
++    @pytest.mark.parametrize("reader", [mock_reader_sfp, mock_reader_dwdm_sfp])
++    def test_create_xcvr_api_8472(self, reader):
++        # 0x0B (DWDM-SFP/SFP+) modules use the SFP serial ID layout too.
++        api = XcvrApiFactory(reader, MagicMock()).create_xcvr_api()
++        assert isinstance(api, Sff8472Api)
++
++    def test_create_xcvr_api_unknown_id(self):
++        assert XcvrApiFactory(mock_reader_unknown, MagicMock()).create_xcvr_api() is None
++
+     @patch('sonic_platform_base.sonic_xcvr.xcvr_api_factory.XcvrApiFactory._create_api', MagicMock(side_effect=Exception('')))
+     @patch('sonic_platform_base.sonic_xcvr.xcvr_api_factory.XcvrApiFactory._create_cmis_api', MagicMock(side_effect=Exception('')))
+     def test_create_xcvr_api_with_exception(self):
+@@ -172,4 +191,52 @@ class TestAmphBackplaneImpl:
+         transceiver_info = amph_backplane.get_transceiver_info()
+         
+         # Verify the result is None
+-        assert transceiver_info is None
+\ No newline at end of file
++        assert transceiver_info is None
++# HUA-SFP-10G-DWDM1A (kamelnetworks/sonic-buildimage#22): identifier 0x0B,
++# otherwise an SFF-8472 module with internally calibrated DDM. Offsets
++# 0x000-0x0FF are A0h, 0x100-0x1FF are A2h, as optoe2 exposes them.
++DWDM_SFP_EEPROM_ROWS = {
++    0x000: '0b 04 07 80 00 00 00 00 00 00 00 03 67 00 50 ff',
++    0x010: '00 00 00 00 50 72 6f 20 31 30 20 4f 70 74 69 78',
++    0x020: '20 20 20 20 00 00 00 00 48 55 41 2d 53 46 50 2d',
++    0x030: '31 30 47 2d 44 57 44 4d 31 41 20 20 06 07 49 df',
++    0x040: '06 1a 00 00 49 4e 45 42 41 30 30 36 30 30 36 31',
++    0x050: '20 20 20 20 31 36 30 36 32 31 20 20 68 f0 05 29',
++    0x100: '4e 00 f8 00 4b 00 fb 00 90 88 71 70 8c 70 75 48',
++    0x110: 'f4 24 1d 4c ea 60 27 10 7b 87 13 94 62 1f 1f 07',
++    0x120: '0c 5a 00 19 07 cb 00 20 ff ff ff ff ff ff ff ff',
++    0x130: 'ff ff ff ff ff ff ff ff 00 00 00 00 00 00 00 00',
++    0x140: '00 00 00 00 3f 80 00 00 00 00 00 00 01 00 00 00',
++    0x150: '01 00 00 00 01 00 00 00 01 00 00 00 00 00 00 b4',
++    0x160: '22 83 83 ba a8 b4 37 aa 01 4b 00 00 00 00 30 00',
++    0x170: '00 00 00 00 00 00 00 00 00 41 24 00 00 00 00 00',
++}
++
++def test_dwdm_sfp_eeprom_end_to_end():
++    eeprom = bytearray(0x200)
++    for offset, row in DWDM_SFP_EEPROM_ROWS.items():
++        eeprom[offset:offset + 16] = bytes.fromhex(row)
++
++    api = XcvrApiFactory(lambda start, length: bytes(eeprom[start:start + length]),
++                         MagicMock()).create_xcvr_api()
++    assert isinstance(api, Sff8472Api)
++
++    info = api.get_transceiver_info()
++    assert info['type'] == 'DWDM-SFP/SFP+'
++    assert info['type_abbrv_name'] == 'DWDM-SFP'
++    assert info['manufacturer'].strip() == 'Pro 10 Optix'
++    assert info['model'] == 'HUA-SFP-10G-DWDM'
++    assert info['serial'].strip() == 'INEBA0060061'
++    assert info['connector'] == 'LC'
++    assert info['nominal_bit_rate'] == 103
++
++    dom = api.get_transceiver_dom_real_value()
++    assert dom['temperature'] == pytest.approx(34.512)
++    assert dom['voltage'] == pytest.approx(3.372)
++    assert dom['tx1bias'] == pytest.approx(86.376)
++    assert dom['tx1power'] == pytest.approx(1.538)
++    assert dom['rx1power'] == pytest.approx(-14.815)
++
++    thresholds = api.get_transceiver_threshold_info()
++    assert thresholds['temphighalarm'] == 78.0
++    assert thresholds['rxpowerlowalarm'] == pytest.approx(-26.021)
