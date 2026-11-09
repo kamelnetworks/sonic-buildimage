@@ -2,6 +2,13 @@
     "VALID_VLAN": {
         "desc": "Configure VLAN table."
     },
+    "VLAN_MTU_MAX": {
+        "desc": "Configure the largest VLAN mtu, the Bridge's 9100."
+    },
+    "VLAN_MTU_ABOVE_BRIDGE": {
+        "desc": "Configure a VLAN mtu above the Bridge's 9100, which the kernel refuses.",
+        "eStrKey" : "Range"
+    },
     "VLAN_INTERFACE_IPPREFIX_MUST_CONDITION_FALSE": {
         "desc": "Vlan Interface Ip-prefix must condition failure.",
         "eStrKey" : "Must"
