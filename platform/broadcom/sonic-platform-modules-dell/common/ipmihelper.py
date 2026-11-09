@@ -249,11 +249,8 @@ class IpmiSensor(object):
 
         bit_mask = self.THRESHOLD_BIT_MASK[threshold_type]
 
-        # Get Sensor Threshold
-        cmd_args = "{} {} {}".format(NetFn_SensorEvent, Cmd_GetSensorThreshold,
-                                     self.id)
-        thresholds = get_ipmitool_raw_output(cmd_args)
-        if len(thresholds) != 7:
+        thresholds = self._get_thresholds()
+        if thresholds is None:
             return False, 0
 
         valid_thresholds = thresholds.pop(0)
@@ -262,6 +259,39 @@ class IpmiSensor(object):
             return self._get_converted_sensor_reading(thresholds[bit_mask])
         else:
             return False, 0
+
+    def _get_thresholds(self):
+        """
+        Returns the Get Sensor Threshold reply as a list of 7 bytes
+        (readable mask, then the six raw thresholds), or None if the
+        command failed or the reply was short.
+        """
+        cmd_args = "{} {} {}".format(NetFn_SensorEvent, Cmd_GetSensorThreshold,
+                                     self.id)
+        thresholds = get_ipmitool_raw_output(cmd_args)
+        if len(thresholds) != 7:
+            return None
+
+        return thresholds
+
+    def is_threshold_readable(self, threshold_type):
+        """
+        Tells apart the two reasons get_threshold() can return False.
+
+        Returns:
+            True if the BMC answered and marks the threshold readable,
+            False if the BMC answered and has no such threshold, or None
+            if the threshold could not be read (the ipmitool command
+            failed or the reply was short).
+        """
+        if self.is_discrete:
+            raise TypeError("Threshold is not applicable for Discrete Sensor")
+
+        thresholds = self._get_thresholds()
+        if thresholds is None:
+            return None
+
+        return bool(thresholds[0] & (1 << self.THRESHOLD_BIT_MASK[threshold_type]))
 
 class IpmiFru(object):
 
