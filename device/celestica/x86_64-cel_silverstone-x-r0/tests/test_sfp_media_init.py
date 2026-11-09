@@ -10,6 +10,7 @@ only xcvrd drives.
 import importlib.util
 import io
 from pathlib import Path
+import re
 import sys
 import time
 import types
@@ -20,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1] / 'sonic_platform'
 NUM_SFP = 34
 SFP_I2C_START = 12
 QSFP28_ID = 0x11
+QSFP_DD_ID = 0x18
 SFP_ID = 0x03
 
 
@@ -35,6 +37,9 @@ class FakeSysfs:
         self.present = set(range(NUM_SFP))
         self.module_ids = {i: QSFP28_ID if i < 32 else SFP_ID for i in range(NUM_SFP)}
         self.drivers = {i: 'optoe1' if i < 32 else 'optoe2' for i in range(NUM_SFP)}
+        # port_name as the init script leaves it (qsfpN / sfpN).
+        self.port_names = {i: 'qsfp{}'.format(i + 1) if i < 32 else 'sfp{}'.format(i - 31)
+                           for i in range(NUM_SFP)}
         self.os = types.SimpleNamespace(
             path=types.SimpleNamespace(isfile=self.isfile),
             open=self.os_open, fdopen=self.os_fdopen, close=lambda fd: None,
@@ -50,7 +55,18 @@ class FakeSysfs:
                 return '0\n' if index in self.present else '1\n'
             if path == '/sys/bus/i2c/devices/{}-0050/name'.format(index + SFP_I2C_START):
                 return self.drivers[index] + '\n'
+            if path == '/sys/bus/i2c/devices/{}-0050/port_name'.format(index + SFP_I2C_START):
+                return self.port_names[index] + '\n'
         raise FileNotFoundError(path)
+
+    def rebind(self, command):
+        """Apply an 'echo ... > .../new_device' shell command the way the
+        kernel would: a fresh optoe client with the driver default port_name."""
+        m = re.match(r'echo (optoe\d) 0x50 >/sys/bus/i2c/devices/i2c-(\d+)/new_device$', command)
+        if m:
+            index = int(m.group(2)) - SFP_I2C_START
+            self.drivers[index] = m.group(1)
+            self.port_names[index] = 'unitialized'  # sic, optoe.c
 
     def isfile(self, path):
         try:
@@ -62,7 +78,7 @@ class FakeSysfs:
     def open(self, path, mode='r', **kwargs):
         if any(flag in mode for flag in 'wa+x'):
             self.writes.append(path)
-            return io.StringIO()
+            return self.Writer(self, path)
         self.reads.append(path)
         return io.StringIO(self.content(path))
 
@@ -78,6 +94,19 @@ class FakeSysfs:
     def module_id(self, sfp):
         self.eeprom_reads.append(sfp.index)
         return self.module_ids[sfp.index] if sfp.index in self.present else None
+
+    class Writer(io.StringIO):
+        """A sysfs attribute opened for writing; stores port_name on close."""
+
+        def __init__(self, fs, path):
+            super().__init__()
+            self.fs, self.path = fs, path
+
+        def close(self):
+            for index in range(NUM_SFP):
+                if self.path == '/sys/bus/i2c/devices/{}-0050/port_name'.format(index + SFP_I2C_START):
+                    self.fs.port_names[index] = self.getvalue().strip()
+            super().close()
 
 
 class ChassisBase:
@@ -159,7 +188,7 @@ def load_platform(fs):
     sfp, chassis = modules['sfp'], modules['chassis']
     sfp.open = fs.open
     sfp.os = fs.os
-    sfp.subprocess = types.SimpleNamespace(Popen=Mock(), PIPE=-1)
+    sfp.subprocess = types.SimpleNamespace(Popen=Mock(side_effect=lambda cmd, **kw: fs.rebind(cmd)), PIPE=-1)
     sfp.time = types.SimpleNamespace(sleep=Mock())
     chassis.time = types.SimpleNamespace(time=time.time, sleep=Mock())
     return stubs, sfp, chassis
@@ -232,6 +261,51 @@ class SfpMediaInitTest(unittest.TestCase):
             'echo 0x50 >/sys/bus/i2c/devices/i2c-17/delete_device',
             'echo optoe2 0x50 >/sys/bus/i2c/devices/i2c-17/new_device',
         ])
+
+    # kamelnetworks/sonic-buildimage#149: new_device creates the optoe client
+    # with port_name 'unitialized' (sic); the rebind must put the init
+    # script's name back.
+    def test_rebind_restores_port_name(self):
+        self.fs.module_ids[4] = QSFP_DD_ID   # QSFP5, a QSFP-DD DAC
+        self.fs.module_ids[33] = QSFP28_ID   # SFP2, odd but exercises the sfpN branch
+        chassis = self.chassis.Chassis()
+
+        chassis.get_change_event(1000)
+
+        self.assertEqual(self.fs.drivers[4], 'optoe3')
+        self.assertEqual(self.fs.drivers[33], 'optoe1')
+        self.assertEqual(self.fs.port_names, {
+            i: 'qsfp{}'.format(i + 1) if i < 32 else 'sfp{}'.format(i - 31) for i in range(NUM_SFP)})
+        self.assertEqual(self.fs.writes, [
+            '/sys/bus/i2c/devices/12-0050/port_name',
+            '/sys/bus/i2c/devices/16-0050/port_name',
+            '/sys/bus/i2c/devices/45-0050/port_name',
+        ])
+
+    def test_no_rebind_leaves_sysfs_alone(self):
+        # Native media everywhere: nothing is rebound and port_name is not touched.
+        self.fs.module_ids[0] = QSFP28_ID
+        chassis = self.chassis.Chassis()
+
+        chassis.get_change_event(1000)
+
+        self.assertEqual(self.shell_commands(), [])
+        self.assertEqual(self.fs.writes, [])
+
+    def test_port_name_write_failure_is_reported_not_raised(self):
+        sfp = self.sfp.Sfp(4)
+        sfp.sfp_type = 'QSFP_DD'
+
+        def deny(path, mode='r', **kwargs):
+            if path.endswith('/port_name'):
+                raise PermissionError(13, 'Permission denied', path)
+            return self.fs.open(path, mode, **kwargs)
+        self.sfp.open = deny
+
+        with patch('sys.stdout', new_callable=io.StringIO) as out:
+            self.assertFalse(sfp._reinit_sfp_driver())
+        self.assertEqual(self.fs.drivers[4], 'optoe3')
+        self.assertIn('port_name', out.getvalue())
 
 
 if __name__ == '__main__':

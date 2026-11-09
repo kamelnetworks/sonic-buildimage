@@ -1,0 +1,51 @@
+name: libyang3 test harness
+on:
+  pull_request:
+    paths:
+      - src/libyang3/**
+      - .github/workflows/libyang3-harness.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  harness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y cmake libcmocka-dev libpcre2-dev libxxhash-dev tcl expect
+      - name: Fetch pinned source and apply package patches
+        run: |
+          curl --fail --location --retry 3 -o libyang.tar.xz https://deb.debian.org/debian/pool/main/liby/libyang/libyang_3.12.2.orig.tar.xz
+          echo 'd7b35a5f9f3a5b929b9c9ee0c2b1b63fbef7be788d88f74e1362b85990002db3  libyang.tar.xz' | sha256sum -c -
+          mkdir libyang-source
+          tar -xJf libyang.tar.xz -C libyang-source --strip-components=1
+          cd libyang-source
+          for patchfile in ../src/libyang3/patch/*.patch; do
+            patch --batch --fuzz=0 -p1 < "$patchfile"
+          done
+      - name: Build libyang tests on CI runner
+        run: |
+          cmake -S libyang-source -B libyang-build -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=ON -DENABLE_VALGRIND_TESTS=OFF
+          cmake --build libyang-build --parallel 2
+      - name: Require real cases without a controlling terminal
+        run: |
+          setsid ctest --test-dir libyang-build -V --parallel 2 </dev/null 2>&1 | tee libyang-ctest.log
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          log = Path('libyang-ctest.log').read_text()
+          assert re.search(r'Total\s+118\s+Passed\s+116\s+Skipped\s+2\s+Failed\s+0', log), 'interactive cases did not execute'
+          assert re.search(r'Total\s+91\s+Passed\s+90\s+Skipped\s+1\s+Failed\s+0', log), 'non-interactive cases did not execute'
+          assert 'Test file error' not in log, 'Tcl file-level errors'
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: libyang3-harness-logs
+          path: |
+            libyang-ctest.log
+            libyang-build/Testing/Temporary/LastTest.log

@@ -10,6 +10,7 @@ from swsscommon.swsscommon import SonicV2Connector
 SYSLOG_IDENTIFIER = os.path.basename(__file__)
 
 SONIC_CFGGEN_PATH = '/usr/local/bin/sonic-cfggen'
+MINIGRAPH_PATH = '/etc/sonic/minigraph.xml'
 
 def log_info(msg):
     syslog.openlog(SYSLOG_IDENTIFIER)
@@ -30,8 +31,18 @@ def run_command(cmd, return_cmd=False):
 def _get_device_type():
     """
     Get device type
+
+    Read it from the minigraph when there is one, and from CONFIG_DB
+    otherwise: sonic-cfggen -m logs a traceback when /etc/sonic/minigraph.xml
+    is missing, which is the normal state of a switch configured from
+    config_db.json or a golden config.
     """
-    device_type = run_command([SONIC_CFGGEN_PATH, '-m', '-v', 'DEVICE_METADATA.localhost.type'], return_cmd=True)
+    if os.path.isfile(MINIGRAPH_PATH):
+        source = '-m'
+    else:
+        log_info("No minigraph at {}, reading device type from CONFIG_DB".format(MINIGRAPH_PATH))
+        source = '-d'
+    device_type = run_command([SONIC_CFGGEN_PATH, source, '-v', 'DEVICE_METADATA.localhost.type'], return_cmd=True)
     return device_type
 
 def _is_storage_device():

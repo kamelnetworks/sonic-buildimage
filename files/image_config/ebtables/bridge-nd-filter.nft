@@ -1,0 +1,13 @@
+# Keep CPU copies of Neighbor Discovery packets local. Hardware forwards allowed
+# ND itself; bridging CPU copies can bypass ingress ACLs and duplicate NS/NA.
+# Reload only our table, in one transaction, preserving other firewall rules.
+add table bridge sonic_nd_guard
+flush table bridge sonic_nd_guard
+
+table bridge sonic_nd_guard {
+    chain forward {
+        type filter hook forward priority -201; policy accept;
+        ether type ip6 meta l4proto ipv6-icmp icmpv6 type 133-137 counter drop
+        ether type vlan vlan type ip6 meta l4proto ipv6-icmp icmpv6 type 133-137 counter drop
+    }
+}
