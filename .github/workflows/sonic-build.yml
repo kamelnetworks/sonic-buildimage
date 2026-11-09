@@ -96,6 +96,11 @@ on:
         description: 'SONIC_DPKG_CACHE_SOURCE host directory (persistent across pods on the runner PVC)'
         required: false
         default: '/var/cache/sonic/artifacts'
+      compiler_cache:
+        description: 'Opt in to persistent ccache for C/C++ rebuilds (requires a writable package-cache source)'
+        required: false
+        type: boolean
+        default: false
       slave_cache:
         description: 'Reuse/push the slave environment image via GHCR (saves ~35 min per pod when warm)'
         required: false
@@ -389,6 +394,7 @@ jobs:
         env:
           CACHE_MODE_INPUT: ${{ inputs.cache_mode }}
           CACHE_SOURCE_INPUT: ${{ inputs.cache_source }}
+          COMPILER_CACHE_INPUT: ${{ inputs.compiler_cache }}
         run: |
           # Do not overwrite an existing local configuration.
           if [[ -e rules/config.user ]]; then
@@ -407,6 +413,16 @@ jobs:
               echo "SONIC_DPKG_CACHE_METHOD = $cache_mode"
               if [[ "$cache_mode" != none ]]; then
                 echo "SONIC_DPKG_CACHE_SOURCE = $CACHE_SOURCE_INPUT"
+              fi
+              if [[ "$COMPILER_CACHE_INPUT" == true && "$cache_mode" != none ]]; then
+                echo 'SONIC_CONFIG_USE_CCACHE = y'
+                # Makefile.work already mounts this persistent source as
+                # /dpkg_cache. Do not use target/ccache: target is cleaned at
+                # job start. override survives slave.mk's default assignment.
+                echo 'override CCACHE_DIR = /dpkg_cache/.ccache-$(shell id -u)/$(BLDENV)/$(CONFIGURED_ARCH)'
+                echo 'export CCACHE_MAXSIZE = 5G'
+              elif [[ "$COMPILER_CACHE_INPUT" == true ]]; then
+                echo '::warning::compiler cache disabled: persistent package cache is unavailable' >&2
               fi
               echo 'SONIC_BUILD_MEMORY = 28g'
               # The k8s release path's package concurrency: 2 concurrent
@@ -525,6 +541,14 @@ jobs:
         run: |
           # Intentional word splitting: TARGETS_INPUT is a make-target list.
           make NOBOOKWORM=1 $BUILD_OPTS $TARGETS_INPUT
+
+      - name: Compiler cache statistics
+        if: ${{ success() && inputs.compiler_cache }}
+        run: |
+          echo 'Compiler cache statistics are cumulative across jobs sharing this directory.'
+          if grep -Eq '^SONIC_CONFIG_USE_CCACHE = y$' rules/config.user; then
+            make NOBOOKWORM=1 $BUILD_OPTS ccache-stats || echo '::warning::could not read compiler-cache statistics'
+          fi
 
       - name: Check dirty version
         # Only meaningful after a build; skip when an earlier step failed.

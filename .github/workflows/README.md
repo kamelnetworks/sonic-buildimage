@@ -91,3 +91,22 @@ Run it locally the same way, in a `python:3.13` container:
 pip install -r scripts/fork-unit-tests-requirements.txt
 scripts/run-fork-unit-tests.sh          # --list shows what would run
 ```
+
+
+## Persistent compiler cache (opt in)
+
+For `sonic-build.yml`, set `compiler_cache=true` to reuse C/C++ compilation
+results when a source package changes and its whole-package cache misses.
+The existing writable `cache_source` is mounted into the slave at `/dpkg_cache`;
+ccache uses `.ccache-<build UID>/<build environment>/<architecture>` there, with a 5 GB
+limit per directory. UID separation avoids ownership conflicts between builders.
+It survives runner pods and `target/` cleanup. Move this
+cache source with the runner PVC; no node-local disk is required.
+
+An existing rules/config.user is preserved, so this input does not override it.
+The default remains off pending component-CI measurements. With `cache_mode=none`
+or an unavailable cache source, this option stays disabled. Package caching,
+compiler flags, compiler-content checking and ccache's normal header/source
+validation remain unchanged. The job prints hit/miss statistics after a successful
+build. A warm single-object test demonstrates reuse, not an under-one-hour full
+image build; compare representative changed-package CI runs before claiming that.
