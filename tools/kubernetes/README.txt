@@ -127,3 +127,15 @@ archive, Silverstone platform and nine exact-kernel-ABI module checks pass; the
 exported installer checksum matches the pod copy. See HANDOFF.txt for artifact
 paths, checksums and source provenance. DVS, hardware boot/module loading and
 other platform images remain pending. The PR remains draft.
+
+Checking an installer: scripts/verify_installer.py runs the read-only checks
+listed above on any platform's installer without executing it: the exit_marker
+boundary, payload size and SHA-1, trailing bytes, the outer tar, the fs.zip
+CRCs, a full dockerfs scan, and, for each expected platform, platforms_asic, its
+platform package and the vermagic of every kernel module in it (plus its device
+directory in fs.squashfs when unsquashfs is installed). By default the expected
+platforms are the release platforms of the installer's ASIC:
+  python3 scripts/verify_installer.py --workdir /work/tmp target/sonic-broadcom.bin
+Use --platform to name others, --allow-trailing for a signed image and --strict
+to fail checks skipped for a missing tool (zstd, unsquashfs). The extraction
+needs about twice the installer size under --workdir (default $TMPDIR).
