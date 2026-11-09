@@ -205,50 +205,60 @@ for tray in range(1, S5232F_MAX_FAN_TRAYS + 1):
     else:
         print('    Fan Tray {}:                      NOT PRESENT'.format(str(tray)))
 
-    def get_psu_presence(index):
-        """
-        Retrieves the presence status of power supply unit (PSU) defined
-                by index <index>
-        :param index: An integer, index of the PSU of which to query status
-        :return: Boolean, True if PSU is plugged, False if not
-        """
-        ret_status = 1
+def ipmi_pipe_failed(exit_codes):
+    """
+    getstatusoutput_noshell_pipe() returns one exit code per command in the
+    pipeline (a list), so a plain truth test on it is always true. Fail only
+    if any command in the pipeline failed.
+    """
+    return any(exit_codes)
 
-        if index == 1:
-            ret_status, ipmi_cmd_ret = getstatusoutput_noshell_pipe(IPMI_PSU1_DATA_DOCKER, awk_cmd)
-        elif index == 2:
-            ret_status, ipmi_cmd_ret = getstatusoutput_noshell_pipe(IPMI_PSU2_DATA_DOCKER, awk_cmd)
 
-        if ret_status:
-            logging.error('Failed to execute ipmitool :' + ' '.join(IPMI_PSU1_DATA_DOCKER))
-            sys.exit(0)
+def get_psu_presence(index):
+    """
+    Retrieves the presence status of power supply unit (PSU) defined
+            by index <index>
+    :param index: An integer, index of the PSU of which to query status
+    :return: Boolean, True if PSU is plugged, False if not
+    """
+    ret_status = [1]
 
-        psu_status = ipmi_cmd_ret
-        return (int(psu_status, 16) & 1)
+    if index == 1:
+        ret_status, ipmi_cmd_ret = getstatusoutput_noshell_pipe(IPMI_PSU1_DATA_DOCKER, awk_cmd)
+    elif index == 2:
+        ret_status, ipmi_cmd_ret = getstatusoutput_noshell_pipe(IPMI_PSU2_DATA_DOCKER, awk_cmd)
 
-    def get_psu_status(index):
-        """
-        Retrieves the presence status of power supply unit (PSU) defined
-                by index <index>
-        :param index: An integer, index of the PSU of which to query status
-        :return: Boolean, True if PSU is plugged, False if not
-        """
-        status = 0
-        ret_status = 1
-        ipmi_cmd_ret = 'f'
+    if ipmi_pipe_failed(ret_status):
+        logging.error('Failed to execute ipmitool :' + ' '.join(IPMI_PSU1_DATA_DOCKER))
+        sys.exit(0)
 
-        if index == 1:
-            ret_status, ipmi_cmd_ret = getstatusoutput_noshell_pipe(IPMI_PSU1_DATA_DOCKER, awk_cmd)
-        elif index == 2:
-            ret_status, ipmi_cmd_ret = getstatusoutput_noshell_pipe(IPMI_PSU2_DATA_DOCKER, awk_cmd)
+    psu_status = ipmi_cmd_ret
+    return (int(psu_status, 16) & 1)
 
-        if ret_status:
-            logging.error('Failed to execute ipmitool : ' + ' '.join(IPMI_PSU2_DATA_DOCKER))
-            sys.exit(0)
 
-        psu_status = ipmi_cmd_ret
+def get_psu_status(index):
+    """
+    Retrieves the presence status of power supply unit (PSU) defined
+            by index <index>
+    :param index: An integer, index of the PSU of which to query status
+    :return: Boolean, True if PSU is plugged, False if not
+    """
+    status = 0
+    ret_status = [1]
+    ipmi_cmd_ret = 'f'
 
-        return (not int(psu_status, 16) > 1)
+    if index == 1:
+        ret_status, ipmi_cmd_ret = getstatusoutput_noshell_pipe(IPMI_PSU1_DATA_DOCKER, awk_cmd)
+    elif index == 2:
+        ret_status, ipmi_cmd_ret = getstatusoutput_noshell_pipe(IPMI_PSU2_DATA_DOCKER, awk_cmd)
+
+    if ipmi_pipe_failed(ret_status):
+        logging.error('Failed to execute ipmitool : ' + ' '.join(IPMI_PSU2_DATA_DOCKER))
+        sys.exit(0)
+
+    psu_status = ipmi_cmd_ret
+
+    return (not int(psu_status, 16) > 1)
 
 
 # Print the information for PSU1, PSU2

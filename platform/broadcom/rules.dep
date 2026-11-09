@@ -5,6 +5,8 @@ include $(PLATFORM_PATH)/platform-modules-s6000.dep
 include $(PLATFORM_PATH)/platform-modules-dell.dep
 include $(PLATFORM_PATH)/platform-modules-arista.dep
 include $(PLATFORM_PATH)/platform-modules-nexthop.dep
+include $(PLATFORM_PATH)/platform-modules-nokia.dep
+include $(PLATFORM_PATH)/../nexthop-common/sonic-platform-nexthop-utils-wheel.dep
 #include $(PLATFORM_PATH)/platform-modules-ingrasys.dep
 include $(PLATFORM_PATH)/platform-modules-accton.dep
 #include $(PLATFORM_PATH)/platform-modules-alphanetworks.dep
@@ -22,8 +24,6 @@ include $(PLATFORM_PATH)/platform-modules-ufispace.dep
 include $(PLATFORM_PATH)/platform-modules-micas.dep
 include $(PLATFORM_PATH)/docker-syncd-brcm.dep
 include $(PLATFORM_PATH)/docker-syncd-brcm-rpc.dep
-include $(PLATFORM_PATH)/docker-syncd-brcm-legacy-th.dep
-include $(PLATFORM_PATH)/docker-syncd-brcm-legacy-th-rpc.dep
 include $(PLATFORM_PATH)/docker-saiserver-brcm.dep
 include $(PLATFORM_PATH)/sswsyncd.dep
 ifeq ($(INCLUDE_PDE), y)
@@ -34,10 +34,9 @@ include $(PLATFORM_PATH)/one-image.dep
 include $(PLATFORM_PATH)/raw-image.dep
 include $(PLATFORM_PATH)/one-aboot.dep
 include $(PLATFORM_PATH)/libsaithrift-dev.dep
-include $(PLATFORM_PATH)/docker-syncd-brcm-dnx.dep
-include $(PLATFORM_PATH)/docker-syncd-brcm-dnx-rpc.dep
 ifeq ($(INCLUDE_GBSYNCD), y)
 include $(PLATFORM_PATH)/../components/docker-gbsyncd-credo.dep
 include $(PLATFORM_PATH)/../components/docker-gbsyncd-broncos.dep
+include $(PLATFORM_PATH)/../components/docker-gbsyncd-agera2.dep
 include $(PLATFORM_PATH)/../components/docker-gbsyncd-milleniob.dep
 endif

@@ -46,6 +46,8 @@ EVENT_8_14_OFFSET = 3
 FRU_SERIAL = 4
 FRU_MODEL = 1
 
+NOT_AVAILABLE = 'N/A'
+
 
 class Psu(PsuBase):
     """Platform-specific Psu class"""
@@ -58,22 +60,46 @@ class Psu(PsuBase):
         self._fan_list.append(fan)
         self._api_helper = APIHelper()
 
+    def _read_sensor(self, key):
+        """
+        Reads the analog byte of one of this PSU's IPMI sensors.
+        Returns:
+            The raw reading as an int, or None if ipmitool failed or answered
+            too little.
+        """
+        status, output = self._api_helper.ipmi_raw(
+            IPMI_SENSOR_NETFN, IPMI_SENSOR_READ_CMD.format(psu_ipmi_id[self.index][key]))
+        fields = output.split()
+        if not status or len(fields) <= ANALOG_READ_OFFSET:
+            return None
+        return int(fields[ANALOG_READ_OFFSET], 16)
+
+    def _read_status_byte(self):
+        """
+        Reads the event byte of this PSU's status sensor.
+        Returns:
+            The event bits as an int, or None if ipmitool failed or answered
+            too little.
+        """
+        status, output = self._api_helper.ipmi_raw(
+            IPMI_SENSOR_NETFN, IPMI_SENSOR_READ_CMD.format(psu_ipmi_id[self.index]['STATUS']))
+        fields = output.split()
+        if not status or len(fields) <= EVENT_0_7_OFFSET:
+            return None
+        return int(fields[EVENT_0_7_OFFSET], 16)
+
     def get_voltage(self):
         """
         Retrieves current PSU voltage output
         Returns:
             A float number, the output voltage in volts,
-            e.g. 12.1
+            e.g. 12.1, or 'N/A' if the reading failed
         """
-        psu_voltage = 0.0
-        psu_vout_key = psu_ipmi_id[self.index]['VOUT']
-        status, output = self._api_helper.ipmi_raw(IPMI_SENSOR_NETFN,\
-                                                   IPMI_SENSOR_READ_CMD.format(psu_vout_key))
-        value = output.split()[ANALOG_READ_OFFSET]
+        value = self._read_sensor('VOUT')
+        if value is None:
+            return NOT_AVAILABLE
         # Formula: Rx10^-1
-        psu_voltage = int(value, 16) / 10.0
-
-        return psu_voltage
+        return value / 10.0
 
     def get_voltage_high_threshold(self):
         return 12.6
@@ -85,32 +111,27 @@ class Psu(PsuBase):
         """
         Retrieves present electric current supplied by PSU
         Returns:
-            A float number, the electric current in amperes, e.g 15.4
+            A float number, the electric current in amperes, e.g 15.4,
+            or 'N/A' if the reading failed
         """
-        psu_current = 0.0
-        psu_cout_key = psu_ipmi_id[self.index]['COUT']
-        status, output = self._api_helper.ipmi_raw(
-            IPMI_SENSOR_NETFN, IPMI_SENSOR_READ_CMD.format(psu_cout_key))
-        value = output.split()[ANALOG_READ_OFFSET]
+        value = self._read_sensor('COUT')
+        if value is None:
+            return NOT_AVAILABLE
         # Formula: Rx3x10^-1
-        psu_current = int(value, 16) * 3 / 10.0
-
-        return psu_current
+        return value * 3 / 10.0
 
     def get_power(self):
         """
         Retrieves current energy supplied by PSU
         Returns:
-            A float number, the power in watts, e.g. 302.6
+            A float number, the power in watts, e.g. 302.6,
+            or 'N/A' if the reading failed
         """
-        psu_power = 0.0
-        psu_pout_key = psu_ipmi_id[self.index]['POUT']
-        status, output = self._api_helper.ipmi_raw(
-            IPMI_SENSOR_NETFN, IPMI_SENSOR_READ_CMD.format(psu_pout_key))
-        value = output.split()[ANALOG_READ_OFFSET]
+        value = self._read_sensor('POUT')
+        if value is None:
+            return NOT_AVAILABLE
         # Formula: Rx5
-        psu_power = int(value, 16) * 5
-        return psu_power
+        return value * 5
 
     def get_powergood_status(self):
         """
@@ -140,18 +161,13 @@ class Psu(PsuBase):
         Retrieves current temperature reading from PSU
         Returns:
             A float number of current temperature in Celsius up to nearest thousandth
-            of one degree Celsius, e.g. 30.125
+            of one degree Celsius, e.g. 30.125, or 'N/A' if the reading failed
         """
         # PSU's ambient temperature sensor is considered as the PSU temperature
-        psu_temp = 0.0
-        psu_temp_id = psu_ipmi_id[self.index]['TEMP']
-        status, output = self._api_helper.ipmi_raw(IPMI_SENSOR_NETFN,\
-                                                   IPMI_SENSOR_READ_CMD.format(psu_temp_id))
-        if status:
-            value = output.split()[ANALOG_READ_OFFSET]
-            psu_temp = float(int(value, 16))
-
-        return psu_temp
+        value = self._read_sensor('TEMP')
+        if value is None:
+            return NOT_AVAILABLE
+        return float(value)
 
     def get_maximum_supplied_power(self):
         """
@@ -181,16 +197,10 @@ class Psu(PsuBase):
         Returns:
             bool: True if PSU is present, False if not
         """
-        psu_presence = False
-        psu_pstatus_key = psu_ipmi_id[self.index]['STATUS']
-        status, raw_status_read = self._api_helper.ipmi_raw(
-            IPMI_SENSOR_NETFN, IPMI_SENSOR_READ_CMD.format(psu_pstatus_key))
-        status_byte = raw_status_read.split()[EVENT_0_7_OFFSET]
-
-        if status:
-            psu_presence = True if int(status_byte, 16) & 0x01 == 0x01 else False
-
-        return psu_presence
+        status_byte = self._read_status_byte()
+        if status_byte is None:
+            return False
+        return status_byte & 0x01 == 0x01
 
     def get_model(self):
         """
@@ -226,7 +236,7 @@ class Psu(PsuBase):
             fru_sr_list = raw_serial.split(':')[-1]
             serial = fru_sr_list.strip()
         else:
-            model = "N/A"
+            serial = "N/A"
 
         return serial
 
@@ -236,16 +246,10 @@ class Psu(PsuBase):
         Returns:
             A boolean value, True if device is operating properly, False if not
         """
-        psu_status = False
-        psu_pstatus_key = psu_ipmi_id[self.index]['STATUS']
-        status, raw_status_read = self._api_helper.ipmi_raw(
-            IPMI_SENSOR_NETFN, IPMI_SENSOR_READ_CMD.format(psu_pstatus_key))
-        status_byte = raw_status_read.split()[EVENT_0_7_OFFSET]
-
-        if status:
-            psu_status = False if int(status_byte, 16) & 0x08 == 0x08 else True
-
-        return psu_status
+        status_byte = self._read_status_byte()
+        if status_byte is None:
+            return False
+        return status_byte & 0x08 != 0x08
 
     def get_position_in_parent(self):
         """

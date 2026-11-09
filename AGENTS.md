@@ -32,7 +32,9 @@ release effort on other platforms.
   machine or in an agent pod. Use one of these:
   - **CI:** `gh workflow run sonic-build.yml -r <branch>`, optionally with
     `-f platforms=marvell-teralynx` or
-    `-f create_release=false`. Runners are the in-cluster ARC set
+    `-f create_release=false`. Non-release builds skip the debug image
+    (`sonic-<platform>-dbg.bin`, `docker-*-dbg.gz`) unless you pass
+    `-f debug_image=true`; releases always build it. Runners are the in-cluster ARC set
     `sonic-buildimage` (max 3, one build at a time per the concurrency group).
     Releases are `<branch>-v<run>`, tagged `build-<branch>-<run>`.
   - **Builder pods:** `sonic-builder` / `sonic-image-builder` in namespace

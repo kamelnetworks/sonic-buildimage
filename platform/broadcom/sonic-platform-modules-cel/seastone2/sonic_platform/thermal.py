@@ -68,12 +68,13 @@ class Thermal(ThermalBase):
 
         if temperature != 0.0:
             if not skip_record:
-                # Record maximum
-                if temperature > self.maximum_thermal:
+                # Record maximum. The stored value is DEFAULT_VAL until the
+                # first successful reading (ipmitool may fail in __init__).
+                if self.maximum_thermal == DEFAULT_VAL or temperature > self.maximum_thermal:
                     self.maximum_thermal = temperature
 
                 # Record minimum
-                if temperature < self.minimum_thermal:
+                if self.minimum_thermal == DEFAULT_VAL or temperature < self.minimum_thermal:
                     self.minimum_thermal = temperature
 
             return temperature
@@ -185,7 +186,8 @@ class Thermal(ThermalBase):
         Returns:
             bool: True if device is present, False if not
         """
-        return True if self.get_temperature() > 0 else False
+        # get_temperature() returns DEFAULT_VAL for a failed or zero reading.
+        return self.get_temperature() != DEFAULT_VAL
 
     def get_status(self):
         """

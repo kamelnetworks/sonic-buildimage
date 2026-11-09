@@ -1,10 +1,12 @@
-"""Seastone 2 platform API against textual ipmitool output (issue #137).
+"""Seastone 2 platform API against textual ipmitool output (issues #137, #143).
 
 `subprocess.getstatusoutput` hands back ipmitool's stdout with only the
 final newline removed, so `ipmitool raw ...` replies keep their leading
 space: ``' 00'``, not ``'00'``.  These tests feed such text through the
 real `APIHelper` and the real consumers (Fan, FanDrawer, Psu, Thermal,
-Chassis, Component) and check that every comparison copes with it.
+Chassis, Component) and check that every comparison copes with it.  The
+#143 cases make ipmitool fail (or answer too little) and check that the
+readers return 'N/A'/False instead of raising into thermalctld and psud.
 
 They need no hardware and no SONiC packages: `sonic_py_common` and the
 `sonic_platform_base` base classes are stubbed with the attributes the
@@ -132,13 +134,24 @@ class FakeIpmitool:
         self.calls.append(cmd)
         if cmd in self.responses:
             return 0, self.responses[cmd]
+        # A full FRU read contains all the configured field replies. Keep
+        # existing consumer cases readable while exercising record selection.
+        if cmd.startswith('ipmitool fru ') and '|' not in cmd:
+            fields = [value for key, value in self.responses.items()
+                      if key.startswith(cmd + " | grep '")]
+            if fields:
+                return 0, '\n'.join(fields)
         return 1, 'Unable to send RAW command (channel=0x0 netfn=0x3a lun=0x0 cmd=0x3 rsp=0xcc): Invalid data field in request'
 
 
 @pytest.fixture
 def ipmi():
+    """A fake BMC, with the helper's reply cache (#163, test_helper_cache.py)
+    switched off: these tests change replies between calls."""
     fake = FakeIpmitool()
-    with patch.object(subprocess, 'getstatusoutput', fake):
+    helper.clear_cache()
+    with patch.object(subprocess, 'getstatusoutput', fake), \
+            patch.object(helper, 'CACHE_TTLS', ()):
         yield fake
 
 
@@ -250,11 +263,18 @@ def test_fan_target_speed(ipmi, reply, percent):
     assert fan.get_target_speed() == percent
 
 
-@pytest.mark.parametrize('reply, color', ((' 00', 'off'), (' 01', 'amber'), (' 02', 'green')))
+@pytest.mark.parametrize('reply, color', ((' 00', 'off'), (' 01', 'amber'), (' 02', 'green'),
+                                          (' 03', 'N/A'), (' ff', 'N/A')))
 def test_fan_status_led(ipmi, reply, color):
+    # #143: an unknown LED value must be 'N/A', not the command's True.
     fan = fan_module.Fan(3, 1)
     ipmi.responses[FAN_LED_CMD.format(fan._fan_led_offset)] = reply
     assert fan.get_status_led() == color
+
+
+def test_fan_status_led_when_ipmitool_fails(ipmi):
+    assert fan_module.Fan(3, 1).get_status_led() == 'N/A'
+    assert psu_module.Psu(0).get_fan(0).get_status_led() == 'N/A'
 
 
 def test_fan_model_and_serial(ipmi):
@@ -292,6 +312,36 @@ def test_psu_readings(ipmi):
     assert psu.get_temperature() == 30.0
 
 
+def test_psu_readings_when_ipmitool_fails(ipmi):
+    # #143: Psu indexed output.split() before checking the command status,
+    # so a failing ipmitool raised IndexError into psud.
+    psu = psu_module.Psu(1)
+    assert psu.get_voltage() == 'N/A'
+    assert psu.get_current() == 'N/A'
+    assert psu.get_power() == 'N/A'
+    assert psu.get_temperature() == 'N/A'
+    assert psu.get_presence() is False
+    assert psu.get_status() is False
+    assert psu.get_powergood_status() is False
+    assert psu.get_status_led() == 'N/A'
+    assert psu.get_model() == 'N/A'
+    assert psu.get_serial() == 'N/A'
+
+
+@pytest.mark.parametrize('reply', ('', ' 78', ' 00 c0'))
+def test_psu_short_reply_is_not_available(ipmi, reply):
+    psu = psu_module.Psu(0)
+    for key in ('0x0f', '0x10', '0x11', '0x0d', '0x72'):
+        ipmi.responses[SENSOR_READ_CMD.format(key)] = reply
+    if len(reply.split()) < 1:
+        assert psu.get_voltage() == 'N/A'
+        assert psu.get_current() == 'N/A'
+        assert psu.get_power() == 'N/A'
+        assert psu.get_temperature() == 'N/A'
+    assert psu.get_presence() is False
+    assert psu.get_status() is False
+
+
 def test_psu_model_and_serial_from_fru(ipmi):
     psu = psu_module.Psu(0)
     ipmi.responses[PSU_STATUS_CMD.format('0x72')] = ' 00 c0 01 00'
@@ -317,6 +367,41 @@ def test_thermal_defaults_when_ipmitool_fails(ipmi):
     thermal = thermal_module.Thermal(0)
     assert thermal.get_temperature() == 'N/A'
     assert thermal.get_high_threshold() == 'N/A'
+    assert thermal.get_high_critical_threshold() == 'N/A'
+    assert thermal.get_minimum_recorded() == 'N/A'
+    assert thermal.get_maximum_recorded() == 'N/A'
+    assert thermal.get_presence() is False
+    assert thermal.get_status() is False
+
+
+def test_thermal_recovers_after_ipmitool_fails_at_init(ipmi):
+    # #143: the first reading is stored as min/max; when it was 'N/A' every
+    # later successful get_temperature() raised TypeError (float > str) in
+    # thermalctld.
+    thermal = thermal_module.Thermal(3)
+    assert thermal.get_minimum_recorded() == 'N/A'
+    ipmi.responses[SENSOR_READ_CMD.format('0x04')] = ' 28 c0 00 00'   # 40 C
+    assert thermal.get_temperature() == 40.0
+    assert thermal.get_presence() is True
+    assert thermal.get_minimum_recorded() == 40.0
+    assert thermal.get_maximum_recorded() == 40.0
+    ipmi.responses[SENSOR_READ_CMD.format('0x04')] = ' 2d c0 00 00'   # 45 C
+    assert thermal.get_temperature() == 45.0
+    ipmi.responses[SENSOR_READ_CMD.format('0x04')] = ' 23 c0 00 00'   # 35 C
+    assert thermal.get_temperature() == 35.0
+    assert thermal.get_minimum_recorded() == 35.0
+    assert thermal.get_maximum_recorded() == 45.0
+
+
+def test_thermal_keeps_min_max_across_a_failed_reading(ipmi):
+    ipmi.responses[SENSOR_READ_CMD.format('0x01')] = ' 1e c0 00 00'
+    thermal = thermal_module.Thermal(0)
+    assert thermal.get_temperature() == 30.0
+    del ipmi.responses[SENSOR_READ_CMD.format('0x01')]
+    assert thermal.get_temperature() == 'N/A'
+    assert thermal.get_presence() is False
+    assert thermal.get_minimum_recorded() == 30.0
+    assert thermal.get_maximum_recorded() == 30.0
 
 
 # -------------------------------------------------------------- chassis

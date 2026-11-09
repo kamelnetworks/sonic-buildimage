@@ -1,0 +1,203 @@
+From 1c196dc28c7cd4e84143229f8e6b4cfdf2f2ee82 Mon Sep 17 00:00:00 2001
+From: Christian Svensson <blue@cmd.nu>
+Date: Sun, 8 Nov 2026 13:00:07 +0100
+Subject: [PATCH] show vxlan: list requested remote VNIs without tunnel state
+
+---
+ show/vxlan.py                          |  29 ++++++
+ tests/vxlan_request_visibility_test.py | 124 +++++++++++++++++++++++++
+ 2 files changed, 153 insertions(+)
+ create mode 100644 tests/vxlan_request_visibility_test.py
+
+diff --git a/show/vxlan.py b/show/vxlan.py
+index 6fb0825..592c7c9 100644
+--- a/show/vxlan.py
++++ b/show/vxlan.py
+@@ -1,4 +1,5 @@
+ import click
++import ipaddress
+ from sonic_py_common import multi_asic
+ import utilities_common.cli as clicommon
+ import utilities_common.multi_asic as multi_asic_util
+@@ -249,6 +250,7 @@ def remotevtep(count):
+ 
+         body = []
+         total_count = 0
++        state_dips = set()
+         db = SonicV2Connector(namespace=ns)
+         db.connect(db.STATE_DB)
+ 
+@@ -266,6 +268,10 @@ def remotevtep(count):
+                         vxlan_table['src_ip'], vxlan_table['dst_ip'],
+                         vxlan_table['tnl_src'], 'oper_' + vxlan_table['operstatus']
+                     ])
++                    try:
++                        state_dips.add(ipaddress.ip_address(vxlan_table['dst_ip']))
++                    except ValueError:
++                        pass
+                     total_count += 1
+ 
+         if count is not None:
+@@ -278,6 +284,29 @@ def remotevtep(count):
+             output += ('%s\n' % (str(total_count)))
+             click.echo(output)
+ 
++            # A request can exist without tunnel state during startup or
++            # after a creation failure. Report that observation separately;
++            # missing STATE_DB data does not identify the cause or prove
++            # that no partial ASIC resources exist.
++            db.connect(db.APPL_DB)
++            requests = []
++            for key in natsorted(db.keys(db.APPL_DB, 'VXLAN_REMOTE_VNI_TABLE:*') or []):
++                parts = key.split(':', 2)
++                if len(parts) != 3:
++                    continue
++                _, vlan, dip = parts
++                try:
++                    if ipaddress.ip_address(dip) in state_dips:
++                        continue
++                except ValueError:
++                    continue
++                entry = db.get_all(db.APPL_DB, key)
++                if entry:
++                    requests.append([dip, vlan, entry.get('vni', 'N/A')])
++            if requests:
++                click.echo('Remote VNI requests without tunnel state:')
++                click.echo(tabulate(requests, ['DIP', 'VLAN', 'VNI'], tablefmt='grid'))
++
+ 
+ @vxlan.command()
+ @click.argument('remote_vtep_ip', required=True)
+diff --git a/tests/vxlan_request_visibility_test.py b/tests/vxlan_request_visibility_test.py
+new file mode 100644
+index 0000000..83378bc
+--- /dev/null
++++ b/tests/vxlan_request_visibility_test.py
+@@ -0,0 +1,124 @@
++"""Requested VNI records without same-namespace tunnel state (buildimage #187)."""
++import importlib
++
++import pytest
++from click.testing import CliRunner
++import show.main as show
++
++vxlan = importlib.import_module('show.vxlan')
++TITLE = 'Remote VNI requests without tunnel state:'
++
++
++def tunnel(dip, status='up'):
++    return {'src_ip': '192.0.2.1', 'dst_ip': dip,
++            'tnl_src': 'EVPN', 'operstatus': status}
++
++
++@pytest.fixture
++def invoke(monkeypatch):
++    def run(states, requests, args=None, namespaces=None):
++        namespaces = namespaces or ['']
++        connections = []
++
++        class ReadOnlyDB:
++            STATE_DB = 6
++            APPL_DB = 0
++
++            def __init__(self, namespace):
++                self.namespace = namespace
++
++            def connect(self, database):
++                connections.append((self.namespace, database))
++
++            def keys(self, database, pattern):
++                expected = ('VXLAN_TUNNEL_TABLE|*' if database == self.STATE_DB
++                            else 'VXLAN_REMOTE_VNI_TABLE:*')
++                assert pattern == expected
++                return list(self.data(database))
++
++            def get_all(self, database, key):
++                return self.data(database).get(key)
++
++            def data(self, database):
++                assert database in (self.STATE_DB, self.APPL_DB)
++                return (states if database == self.STATE_DB else requests).get(self.namespace, {})
++
++        monkeypatch.setattr(vxlan, 'SonicV2Connector', ReadOnlyDB)
++        monkeypatch.setattr(vxlan.multi_asic_util, 'multi_asic_get_ns_list', lambda _: namespaces)
++        monkeypatch.setattr(vxlan.multi_asic, 'is_multi_asic', lambda: len(namespaces) > 1)
++        result = CliRunner().invoke(show.cli.commands['vxlan'].commands['remotevtep'], args or [])
++        assert result.exit_code == 0, (result.output, result.exception)
++        return result.output, connections
++    return run
++
++
++def test_requested_peer_is_separate_from_existing_operational_rows(invoke):
++    states = {'': {'VXLAN_TUNNEL_TABLE|192.0.2.1|10.0.0.2': tunnel('10.0.0.2', 'down')}}
++    baseline, _ = invoke(states, {})
++    output, _ = invoke(states, {'': {
++        'VXLAN_REMOTE_VNI_TABLE:Vlan100:10.0.0.2': {'vni': '10100'},
++        'VXLAN_REMOTE_VNI_TABLE:Vlan200:10.0.0.3': {'vni': '10200'},
++    }})
++    existing, missing = output.split(TITLE)
++    assert existing == baseline
++    assert 'oper_down' in existing
++    assert '10.0.0.3' in missing and 'Vlan200' in missing and '10200' in missing
++    assert '10.0.0.2' not in missing
++    assert 'OperStatus' not in missing
++
++
++def test_empty_state_lists_every_requested_vni_without_local_context(invoke):
++    output, _ = invoke({}, {'': {
++        'VXLAN_REMOTE_VNI_TABLE:Vlan200:10.0.0.9': {'vni': '10200'},
++        'VXLAN_REMOTE_VNI_TABLE:Vlan100:10.0.0.9': {'vni': '10100'},
++    }})
++    assert 'Total count : 0' in output
++    missing = output.split(TITLE)[1]
++    assert missing.count('10.0.0.9') == 2
++    assert '10100' in missing and '10200' in missing
++    assert missing.index('Vlan100') < missing.index('Vlan200')
++
++
++def test_count_semantics_and_state_only_read_are_unchanged(invoke):
++    output, connections = invoke(
++        {'': {'VXLAN_TUNNEL_TABLE|192.0.2.1|10.0.0.2': tunnel('10.0.0.2')}},
++        {'': {'VXLAN_REMOTE_VNI_TABLE:Vlan100:10.0.0.9': {'vni': '10100'}}},
++        args=['count'])
++    assert output == 'Total count : 1\n\n'
++    assert connections == [('', 6)]
++
++
++def test_matching_ipv6_spellings_and_missing_ipv6_request(invoke):
++    states = {'': {'VXLAN_TUNNEL_TABLE|192.0.2.1|2001:db8::2': tunnel('2001:db8::2')}}
++    output, _ = invoke(states, {'': {
++        'VXLAN_REMOTE_VNI_TABLE:Vlan100:2001:0db8:0:0:0:0:0:2': {'vni': '10100'},
++    }})
++    assert TITLE not in output
++    output, _ = invoke(states, {'': {
++        'VXLAN_REMOTE_VNI_TABLE:Vlan100:2001:db8::3': {'vni': '10100'},
++    }})
++    assert '2001:db8::3' in output.split(TITLE)[1]
++
++
++def test_tunnel_state_from_another_namespace_cannot_hide_a_request(invoke):
++    output, _ = invoke(
++        {'asic0': {'VXLAN_TUNNEL_TABLE|192.0.2.1|10.0.0.2': tunnel('10.0.0.2')}},
++        {'asic0': {'VXLAN_REMOTE_VNI_TABLE:Vlan100:10.0.0.2': {'vni': '10100'}},
++         'asic1': {'VXLAN_REMOTE_VNI_TABLE:Vlan200:10.0.0.2': {'vni': '10200'}}},
++        namespaces=['asic0', 'asic1'])
++    first, second = output.split('Namespace: asic1')
++    assert TITLE not in first
++    assert TITLE in second
++    assert '10.0.0.2' in second and '10200' in second
++
++
++def test_deleted_or_malformed_requests_do_not_break_the_view(invoke):
++    output, _ = invoke({}, {'': {
++        'VXLAN_REMOTE_VNI_TABLE:Vlan100:10.0.0.2': None,
++        'VXLAN_REMOTE_VNI_TABLE:Vlan100': {'vni': '10100'},
++        'VXLAN_REMOTE_VNI_TABLE:Vlan100:bad-ip': {'vni': '10100'},
++        'VXLAN_REMOTE_VNI_TABLE:Vlan200:10.0.0.3': {'other': 'partial'},
++    }})
++    missing = output.split(TITLE)[1]
++    assert '10.0.0.2' not in missing and 'bad-ip' not in missing
++    assert '10.0.0.3' in missing and 'N/A' in missing
+-- 
+2.52.0
+
