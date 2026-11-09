@@ -14,3 +14,9 @@ not infer ASIC state or a capacity/failure diagnosis from missing tunnel state.
 The carried CLI tests cover multiple VNIs, IPv6, namespace isolation and
 empty/deleted/partial records. Keep it alongside the ACL patch and any
 independently approved NTP patch when resolving series conflicts.
+
+0004 removes the valid_speeds field from CONFIG_DB PORT entries in
+db_migrator's common_migration_ops (issue #136; the stock port_config.ini
+files lost the column in #140). It deliberately adds no database version,
+so a config migrated here never records a version upstream doesn't know;
+tests/test_db_migrator_valid_speeds_patch.py guards that.
