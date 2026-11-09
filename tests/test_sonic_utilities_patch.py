@@ -51,6 +51,10 @@ class SonicUtilitiesPatchTest(unittest.TestCase):
         cls.tmp = Path(tempfile.mkdtemp(prefix='sonic-utilities-patch-'))
         for files in cls.touched.values():
             for f in files:
+                # A file a patch creates has no pinned version to export.
+                if subprocess.run(['git', 'cat-file', '-e', f'HEAD:{f}'], cwd=SUBMODULE,
+                                  capture_output=True).returncode != 0:
+                    continue
                 target = cls.tmp / f
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(run(['git', 'show', f'HEAD:{f}'], SUBMODULE).stdout)
