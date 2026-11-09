@@ -42,6 +42,9 @@ route-map {{rm_key[0]}} {{rm_val['route_operation']}} {{rm_key[1]}}
 {% endfor %}
 {% endif %}
 {% endif %}
+{% if 'match_ipv6_prefix_set' in rm_val %}
+ match ipv6 address prefix-list {{rm_val['match_ipv6_prefix_set']}}
+{% endif %}
 {# ---------------match ip/ipv6-  End-------------------------- #}
 {% if 'match_local_pref' in rm_val %}
  match local-preference {{rm_val['match_local_pref']}}
@@ -115,8 +118,8 @@ route-map {{rm_key[0]}} {{rm_val['route_operation']}} {{rm_key[1]}}
 {% if 'set_ipv6_next_hop_prefer_global' in rm_val and rm_val['set_ipv6_next_hop_prefer_global'] == 'true' %}
  set ipv6 next-hop prefer-global
 {% endif %}
-{% if 'set_local_preference' in rm_val %}
- set local-preference {{rm_val['set_local_preference']}}
+{% if 'set_local_pref' in rm_val %}
+ set local-preference {{rm_val['set_local_pref']}}
 {% endif %}
 {# ---------------set metric and med - Start--------------------- #}
 {% if 'set_metric_action' in rm_val %}

@@ -1929,6 +1929,7 @@ class BGPConfigDaemon:
     route_map_key_map = [('match_interface',                '{no:no-prefix}match interface {}'),
                          ('match_prefix_set|ipv4',          '{no:no-prefix}match ip address prefix-list {}'),
                          ('match_prefix_set|ipv6',          '{no:no-prefix}match ipv6 address prefix-list {}'),
+                         ('match_ipv6_prefix_set',          '{no:no-prefix}match ipv6 address prefix-list {}'),
                          ('match_neighbor',                 '[bgpd]{no:no-prefix}match peer {:peer-ip}'),
                          ('match_tag',                      '{no:no-prefix}match tag {}'),
                          ('match_protocol',                 '[zebra]{no:no-prefix}match source-protocol {:src-proto}'),
