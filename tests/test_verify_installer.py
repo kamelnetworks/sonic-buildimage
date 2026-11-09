@@ -249,3 +249,41 @@ class VerifyInstallerTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class CompressionFooterTest(unittest.TestCase):
+    def test_corrupt_footers(self):
+        raw = io.BytesIO()
+        with tarfile.open(fileobj=raw, mode='w') as archive:
+            info = tarfile.TarInfo('file')
+            info.size = 1
+            archive.addfile(info, io.BytesIO(b'x'))
+        good = gzip.compress(raw.getvalue() + bytes(100000))
+        cases = [good[:-8], good[:-8] + bytes([good[-8] ^ 1]) + good[-7:]]
+        for data in cases:
+            with self.subTest(data=data[-8:]), tempfile.NamedTemporaryFile() as f:
+                f.write(data)
+                f.flush()
+                count, error, skip = vi.scan_tar(f.name)
+                self.assertEqual(count, 1)
+                self.assertIsNotNone(error)
+                self.assertIsNone(skip)
+
+    def test_zstd_nonzero_after_valid_tar(self):
+        raw = io.BytesIO()
+        with tarfile.open(fileobj=raw, mode='w') as archive:
+            archive.addfile(tarfile.TarInfo('empty'))
+        proc = mock.Mock()
+        proc.stdout = io.BytesIO(raw.getvalue())
+        proc.wait.return_value = 1
+        proc.poll.return_value = 1
+        with tempfile.NamedTemporaryFile() as f:
+            f.write(vi.ZSTD_MAGIC)
+            f.flush()
+            with mock.patch.object(vi.shutil, 'which', return_value='/usr/bin/zstd'), \
+                 mock.patch.object(vi.subprocess, 'Popen', return_value=proc):
+                count, error, skip = vi.scan_tar(f.name)
+        self.assertEqual(count, 1)
+        self.assertIn('zstd decompression failed', error)
+        self.assertIsNone(skip)
+        proc.wait.assert_called()

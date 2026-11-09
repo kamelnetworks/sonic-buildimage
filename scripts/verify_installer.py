@@ -178,6 +178,7 @@ def open_compressed(path):
         if not shutil.which('zstd'):
             return None, 'zstd-compressed and no zstd tool'
         proc = subprocess.Popen(['zstd', '-dc', path], stdout=subprocess.PIPE)
+        proc.stdout.decompressor = proc
         return proc.stdout, None
     return open(path, 'rb'), None
 
@@ -188,6 +189,7 @@ def scan_tar(path):
     if stream is None:
         return None, None, reason
     count = 0
+    proc = getattr(stream, 'decompressor', None)
     try:
         with stream, tarfile.open(fileobj=stream, mode='r|') as tar:
             for member in tar:
@@ -196,8 +198,18 @@ def scan_tar(path):
                     fobj = tar.extractfile(member)
                     while fobj.read(CHUNK):
                         pass
+            # Tar EOF precedes compression EOF (including checksum/footer).
+            while stream.read(CHUNK):
+                pass
+            if proc is not None and proc.wait() != 0:
+                raise OSError('zstd decompression failed')
     except (tarfile.TarError, OSError, EOFError, lzma.LZMAError) as e:
         return count, '%s: %s' % (type(e).__name__, e), None
+    finally:
+        if proc is not None:
+            if proc.poll() is None:
+                proc.terminate()
+            proc.wait()
     return count, None, None
 
 
