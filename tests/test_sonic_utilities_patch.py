@@ -9,6 +9,9 @@ checks the behaviour the patches add:
     sonic-ntp.yang (NTP_SERVER keyed on inet:host) allows (#129). The
     validator, utilities_common.cli.is_hostname(), is exercised here without
     importing sonic-utilities (that needs swsscommon).
+  - 0005: 'config interface breakout' gives the new ports the mtu and fec of
+    the ports they replace (#197). ConfigMgmtDPB._inheritPortAttrs() is run
+    here against a stub data tree.
 
 Needs git. Run with: python3 -m pytest tests/test_sonic_utilities_patch.py
 """
@@ -88,6 +91,60 @@ class SonicUtilitiesPatchTest(unittest.TestCase):
         namespace = {}
         exec(compile(ast.Module(body=nodes, type_ignores=[]), path, 'exec'), namespace)
         return namespace[name]
+
+    def extract_method(self, path, cls, name):
+        """Compile one method of a class in a patched file, without importing it."""
+        module = ast.parse(self.patched(path))
+        classes = [n for n in module.body if isinstance(n, ast.ClassDef) and n.name == cls]
+        self.assertEqual(len(classes), 1, f'{cls} not found once in {path}')
+        nodes = [n for n in classes[0].body if isinstance(n, ast.FunctionDef) and n.name == name]
+        self.assertEqual(len(nodes), 1, f'{cls}.{name} not found once in {path}')
+        namespace = {}
+        exec(compile(ast.Module(body=nodes, type_ignores=[]), path, 'exec'), namespace)
+        return namespace[name]
+
+    def test_breakout_inherits_before_deleting(self):
+        main = self.patched('config/config_mgmt.py')
+        start = main.index('    def breakOutPort(')
+        body = main[start:main.index('\n    def ', start + 1)]
+        self.assertLess(body.index('self._inheritPortAttrs('), body.index('self._deletePorts('))
+        self.assertIn('config_dpb_inherit_test.py',
+                      ' '.join(self.touched['0005-config-interface-breakout-new-ports-inherit-mtu-and-fec.patch']))
+
+    def test_inherit_port_attrs(self):
+        inherit = self.extract_method('config/config_mgmt.py', 'ConfigMgmtDPB', '_inheritPortAttrs')
+
+        class Dpb:
+            def __init__(self, ports):
+                self.sy = type('Sy', (), {'getData': lambda _: {'PORT': ports}})()
+
+            def sysLog(self, **kwargs):
+                pass
+
+        def run(old, new, delPorts=None):
+            portJson = {'PORT': new}
+            out = inherit(Dpb(old), delPorts=delPorts or list(old), portJson=portJson)
+            self.assertEqual(portJson, {'PORT': new}, 'portJson was modified in place')
+            return out['PORT']
+
+        # 1x100G -> 4x25G: the children get the parent's mtu and fec
+        children = {f'Ethernet{i}': {'lanes': str(65 + i), 'speed': '25000'} for i in range(4)}
+        out = run({'Ethernet0': {'lanes': '65,66,67,68', 'mtu': '9216', 'fec': 'rs'}}, children)
+        self.assertEqual({(e['mtu'], e['fec']) for e in out.values()}, {('9216', 'rs')})
+        self.assertEqual(sorted(out), sorted(children))
+        # 4x25G -> 1x100G: highest mtu, first active fec in lane order
+        old = {'Ethernet3': {'lanes': '68', 'fec': 'fc'}, 'Ethernet2': {'lanes': '67', 'fec': 'rs', 'mtu': '1500'},
+               'Ethernet1': {'lanes': '66', 'mtu': 9216}, 'Ethernet0': {'lanes': '65', 'fec': 'none'}}
+        out = run(old, {'Ethernet0': {'lanes': '65,66,67,68', 'speed': '100000'}})
+        self.assertEqual(out['Ethernet0'], {'lanes': '65,66,67,68', 'speed': '100000', 'mtu': '9216', 'fec': 'rs'})
+        # nothing set: no mtu, fec none
+        out = run({'Ethernet0': {'lanes': '65,66,67,68'}}, children)
+        self.assertEqual({tuple(sorted(e)) for e in out.values()}, {('fec', 'lanes', 'speed')})
+        self.assertEqual({e['fec'] for e in out.values()}, {'none'})
+        # 400G -> 4x100G (Silverstone-X, 50G PAM4 lanes): platform rs stays without an active fec
+        pam4 = {f'Ethernet{i}': {'lanes': f'{i + 1},{i + 2}', 'speed': '100000', 'fec': 'rs'} for i in range(0, 8, 2)}
+        out = run({'Ethernet0': {'lanes': '1,2,3,4,5,6,7,8', 'fec': 'none', 'mtu': '9100'}}, pam4)
+        self.assertEqual({(e['mtu'], e['fec']) for e in out.values()}, {('9100', 'rs')})
 
     def test_ntp_add_uses_hostname_validation(self):
         main = self.patched('config/main.py')
