@@ -26,6 +26,7 @@ PORT_CONFIG_INI = HWSKU_DIR / 'port_config.ini'
 
 REPO_ROOT = PLATFORM_DIR.parents[2]
 CONFIG_ENGINE = REPO_ROOT / 'src' / 'sonic-config-engine'
+DEVICE_DATA_TESTS = REPO_ROOT / 'src' / 'sonic-device-data' / 'tests'
 sys.path.insert(0, str(CONFIG_ENGINE))
 try:
     import portconfig
@@ -203,6 +204,24 @@ class PlatformJsonTest(unittest.TestCase):
                 'Ethernet4': {'alias': 'QSFP1/2', 'lanes': '221,222,223,224', 'speed': '200000', 'fec': 'rs'},
             })
 
+
+class DeviceDataCheckerTest(unittest.TestCase):
+    """sonic-device-data's `make test` runs these checkers over every file in
+    device/, and a failure stops every image build at sonic-device-data.deb."""
+
+    def run_checker(self, checker, filename, own_file):
+        files = sorted(str(f) for f in (REPO_ROOT / 'device').rglob(filename))
+        self.assertIn(str(own_file), files)
+        result = subprocess.run([sys.executable, str(DEVICE_DATA_TESTS / checker)] + files,
+                                capture_output=True, text=True)
+        failures = [line for line in result.stdout.splitlines() if 'passed validity check' not in line]
+        self.assertEqual(result.returncode, 0, '\n'.join(failures) + result.stderr)
+
+    def test_every_hwsku_json_passes_hwsku_json_checker(self):
+        self.run_checker('hwsku_json_checker', 'hwsku.json', HWSKU_JSON)
+
+    def test_every_platform_json_passes_platform_json_checker(self):
+        self.run_checker('platform_json_checker', 'platform.json', PLATFORM_JSON)
 
 if __name__ == '__main__':
     unittest.main()
