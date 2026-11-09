@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Christian Svensson <blue@cmd.nu>
+Date: Thu, 5 Nov 2026 18:38:59 +0000
+Subject: [PATCH] syncd: don't discover ports after a bulk create that created
+ none
+
+When the vendor SAI refuses every port of a bulk create (for example a
+breakout mode the ASIC can't do), processBulkOidCreate still called
+onPostPortsCreate with zero RIDs. The empty discovery issued HMGET
+RIDTOVID without fields, redis rejected it, and the exception put syncd
+in shutdown-wait, which took orchagent and the whole data plane down.
+
+Skip the post-create discovery when nothing was created, and make
+getVidsForRids return early for an empty list. The per-object statuses
+go back to the caller as before.
+
+Refs kamelnetworks/sonic-buildimage#172
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_012hdRF8Zy5SCkLbDUZhMxWh
+---
+ syncd/RedisClient.cpp | 6 ++++++
+ syncd/Syncd.cpp       | 8 +++++++-
+ 2 files changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/syncd/RedisClient.cpp b/syncd/RedisClient.cpp
+index 4f4c4791..7463acbb 100644
+--- a/syncd/RedisClient.cpp
++++ b/syncd/RedisClient.cpp
+@@ -811,6 +811,12 @@ void RedisClient::getVidsForRids(
+ {
+     SWSS_LOG_ENTER();
+ 
++    if (count == 0)
++    {
++        // HMGET needs at least one field
++        return;
++    }
++
+     swss::RedisCommand hmget;
+ 
+     std::vector<std::string> cmds;
+diff --git a/syncd/Syncd.cpp b/syncd/Syncd.cpp
+index 1d127186..f7edc773 100644
+--- a/syncd/Syncd.cpp
++++ b/syncd/Syncd.cpp
+@@ -3390,7 +3390,13 @@ sai_status_t Syncd::processBulkOidCreate(
+ 
+     m_translator->insertRidsAndVids(createdRids.size(), createdRids.data(), createdVids.data());
+ 
+-    if (objectType == SAI_OBJECT_TYPE_PORT)
++    /*
++     * With every port of the bulk refused by the vendor SAI there is nothing
++     * to discover, and an empty discovery issues HMGET RIDTOVID without
++     * fields, which redis rejects. That exception put syncd in shutdown-wait
++     * and took orchagent down with it; return the statuses instead.
++     */
++    if (objectType == SAI_OBJECT_TYPE_PORT && !createdRids.empty())
+     {
+         m_switches.at(switchVid)->onPostPortsCreate(createdRids.size(), createdRids.data());
+     }
+-- 
+2.47.3
+

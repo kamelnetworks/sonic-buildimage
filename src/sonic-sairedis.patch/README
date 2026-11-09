@@ -1,0 +1,34 @@
+Refused bulk port creation (#172)
+================================
+
+Apply this series to the upstream sonic-sairedis gitlink, currently
+8b5e2228c7a254bcef706274738d5e215e9fe930. slave.mk applies/pops the series
+around package builds; no fork pin or vendor package is changed here.
+
+The guard skips post-create discovery if the SAI created no ports, preserving
+per-object failure statuses. The RedisClient guard separately makes an empty
+RID-to-VID lookup a no-op instead of issuing an invalid HMGET.
+
+Required companion: kamelnetworks/sonic-swss#9 (orchagent refusal handling and
+portsyncd initialization handshake), delivered through shared buildimage#109.
+Neither component alone completes buildimage#172. Do not include unsupported
+modes in production platform data merely to trigger this path.
+
+Validation:
+  git submodule update --init --depth 1 src/sonic-sairedis
+  python3 -m unittest discover -s tests -p test_sairedis_patch_series.py -v
+
+The test applies every listed patch to committed source at the gitlink, then
+compiles the actual changed method bodies with deterministic dependency fakes.
+It covers all-refused/mixed/successful creates, unsupported bulk APIs, non-port
+objects, empty input, zero-count Redis lookup and ordinary nonempty lookup.
+Removing either guard must reproduce a failure. These checks are lightweight;
+they do not replace the full syncd build, sairedis suite or vendor integration.
+
+Before acceptance: CI-built image with both components; on Seastone 2 and
+S5232F, verify refused-create runtime and initialization recovery with refused
+rows retained, valid sibling ports/PortInitDone/LAGs and services healthy, then
+corrected configuration recovery and complete restoration. Root owns those
+hardware operations and any restart authorization.
+
+Remove the carried patch after the corresponding upstream fix is in the pin.
