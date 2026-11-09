@@ -28,6 +28,7 @@ ROOT=$PWD
 # Pinned submodules the Python tests import, fetched shallow at the commit
 # this tree pins. Add one here (and to PYPATH) when a new test needs it.
 SUBMODULES=(
+    src/sonic-sairedis
     src/sonic-platform-common
     src/sonic-platform-daemons
     src/sonic-utilities
