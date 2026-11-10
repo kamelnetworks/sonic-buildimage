@@ -31,6 +31,9 @@ SUBMODULES=(
     src/sonic-sairedis
     src/sonic-platform-common
     src/sonic-platform-daemons
+    # tests/test_xgs_module_order.py applies platform/broadcom/saibcm-modules.patch
+    # to this submodule's debian/ files; nothing imports it.
+    platform/broadcom/saibcm-modules
     src/sonic-utilities
 )
 PYPATH=(

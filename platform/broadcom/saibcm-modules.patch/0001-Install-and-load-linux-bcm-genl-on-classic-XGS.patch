@@ -1,0 +1,43 @@
+diff --git a/debian/opennsl-modules.init b/debian/opennsl-modules.init
+index 4484482..2f371ab 100644
+--- a/debian/opennsl-modules.init
++++ b/debian/opennsl-modules.init
+@@ -57,6 +57,10 @@ function load_kernel_modules()
+ 
+         modprobe linux-bcm-knet use_rx_skb=1 rx_buffer_size=9238 debug=0x5020 default_mtu=9100 use_napi=$use_napi
+         modprobe linux-knet-cb
++        # linux-bcm-genl provides /proc/bcm/genl/psample, which the SAI uses
++        # to set per-port sFlow sample rates on classic XGS (e.g. Trident 3).
++        # Load it after KNET so it cannot autoload KNET with default params.
++        modprobe linux-bcm-genl
+         modprobe linux_ngbde
+     fi
+ }
+@@ -70,12 +74,14 @@ function remove_kernel_modules()
+         rmmod linux_ngbde
+         rmmod psample
+     else
+-        rmmod psample
++        # Remove consumers before KNET and psample, which they reference.
++        rmmod linux-bcm-genl
+         rmmod linux-knet-cb
+         rmmod linux-bcm-knet
+         rmmod linux-user-bde
+         rmmod linux-kernel-bde
+         rmmod linux_ngbde
++        rmmod psample
+     fi
+ }
+ 
+diff --git a/debian/opennsl-modules.install b/debian/opennsl-modules.install
+index 936b881..cbd549b 100644
+--- a/debian/opennsl-modules.install
++++ b/debian/opennsl-modules.install
+@@ -2,6 +2,7 @@ systems/linux/user/x86-smp_generic_64-2_6/linux-bcm-knet.ko lib/modules/6.12.41+
+ systems/linux/user/x86-smp_generic_64-2_6/linux-kernel-bde.ko lib/modules/6.12.41+deb13-sonic-amd64/extra
+ systems/linux/user/x86-smp_generic_64-2_6/linux-user-bde.ko lib/modules/6.12.41+deb13-sonic-amd64/extra
+ systems/linux/user/x86-smp_generic_64-2_6/linux-knet-cb.ko lib/modules/6.12.41+deb13-sonic-amd64/extra
++systems/linux/user/x86-smp_generic_64-2_6/linux-bcm-genl.ko lib/modules/6.12.41+deb13-sonic-amd64/extra
+ systemd/opennsl-modules.service lib/systemd/system
+ sdklt/build/bde/linux_ngbde.ko lib/modules/6.12.41+deb13-sonic-amd64/extra
+ sdklt/build/knet/linux_ngknet.ko lib/modules/6.12.41+deb13-sonic-amd64/extra
