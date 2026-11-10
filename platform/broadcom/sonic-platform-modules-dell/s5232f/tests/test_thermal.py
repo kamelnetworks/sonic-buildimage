@@ -8,7 +8,9 @@ ThermalBase, which raises NotImplementedError; thermalctld wrote 'N/A' to
 STATE_DB and system-health stayed Not OK with 'Invalid ASIC On-board
 temperature data, temperature=32.0, threshold=N/A'. Thermal must return the
 platform default for such sensors, and a threshold the BMC does report must
-still win.
+still win. A failed BMC read (ipmitool fails, short reply) must not pass as
+fine: it is None ('N/A'), which system-health reports as Not OK, never the
+default and never 0 C.
 
 Needs sonic-platform-common on PYTHONPATH, e.g. from the repository root:
 

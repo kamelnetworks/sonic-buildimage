@@ -40,7 +40,11 @@ class Thermal(ThermalBase):
     # data ... threshold=N/A'. The values are the ones Dell's BMC reports for
     # the same sensor on the sister S5248F-ON: 78 C upper non-critical and
     # 80 C upper critical (85 C upper non-recoverable). A threshold the BMC
-    # does report always takes precedence over this table.
+    # does report always takes precedence over this table. The thresholds
+    # can't be repaired on the BMC instead: its SDR marks none of them
+    # settable for this sensor, and Set Sensor Threshold is refused with
+    # 0xCD (command illegal for specified sensor). A failed BMC read is not
+    # replaced by these defaults, see _get_upper_threshold().
     DEFAULT_THRESHOLDS = {
         'ASIC On-board': (78.0, 80.0),
     }
