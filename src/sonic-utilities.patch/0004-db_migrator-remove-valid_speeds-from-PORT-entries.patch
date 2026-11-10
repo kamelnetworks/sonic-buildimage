@@ -1,0 +1,163 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Christian Svensson <blue@cmd.nu>
+Date: Mon, 9 Nov 2026 18:59:13 +0000
+Subject: [PATCH] db_migrator: remove valid_speeds from PORT entries
+
+Some platforms' port_config.ini had a valid_speeds column, which
+sonic-cfggen copies into every PORT entry. sonic-port.yang has no such
+leaf, so 'config reload' rejects a config_db.json that carries it.
+Remove the field in common_migration_ops, which runs on every migration,
+so no fork-only database version is introduced.
+---
+ scripts/db_migrator.py                        | 19 +++++++++++
+ .../config_db/port_valid_speeds_expected.json | 25 +++++++++++++++
+ .../config_db/port_valid_speeds_input.json    | 27 ++++++++++++++++
+ tests/db_migrator_test.py                     | 32 +++++++++++++++++++
+ 4 files changed, 103 insertions(+)
+ create mode 100644 tests/db_migrator_input/config_db/port_valid_speeds_expected.json
+ create mode 100644 tests/db_migrator_input/config_db/port_valid_speeds_input.json
+
+diff --git a/scripts/db_migrator.py b/scripts/db_migrator.py
+index 4c376a1b..83f63120 100755
+--- a/scripts/db_migrator.py
++++ b/scripts/db_migrator.py
+@@ -866,6 +866,24 @@ class DBMigrator():
+             self.configDB.set_entry("TACPLUS", "global", global_new)
+             log.log_info('Migrate TACPLUS global: {}'.format(global_new))
+ 
++    def migrate_port_valid_speeds(self):
++        """
++        Remove the 'valid_speeds' field from PORT entries.
++
++        Some platforms' port_config.ini had a valid_speeds column, which
++        sonic-cfggen copies into every PORT entry. sonic-port.yang has no such
++        leaf and nothing reads the field, so a config_db.json that carries it
++        fails the YANG validation that 'config reload' runs. The stock files no
++        longer have the column; this cleans up configs made from the old ones.
++        """
++        ports = [key for key in self.configDB.get_keys('PORT')
++                 if 'valid_speeds' in self.configDB.get_entry('PORT', key)]
++        client = self.configDB.get_redis_client(self.configDB.CONFIG_DB)
++        for port in ports:
++            client.hdel('PORT{}{}'.format(self.configDB.KEY_SEPARATOR, port), 'valid_speeds')
++        if ports:
++            log.log_notice('Removed valid_speeds from {} PORT entries'.format(len(ports)))
++
+     def migrate_aaa(self):
+         if not self.config_src_data or 'AAA' not in self.config_src_data:
+             return
+@@ -1491,6 +1509,7 @@ class DBMigrator():
+ 
+         self.migrate_tacplus()
+         self.migrate_aaa()
++        self.migrate_port_valid_speeds()
+ 
+     def migrate(self):
+         version = self.get_version()
+diff --git a/tests/db_migrator_input/config_db/port_valid_speeds_expected.json b/tests/db_migrator_input/config_db/port_valid_speeds_expected.json
+new file mode 100644
+index 00000000..e2244f0b
+--- /dev/null
++++ b/tests/db_migrator_input/config_db/port_valid_speeds_expected.json
+@@ -0,0 +1,25 @@
++{
++    "PORT|Ethernet0": {
++        "alias": "Eth1/1",
++        "index": "1",
++        "lanes": "1,2,3,4",
++        "speed": "100000"
++    },
++    "PORT|Ethernet4": {
++        "admin_status": "up",
++        "alias": "Eth2/1",
++        "index": "2",
++        "lanes": "5,6,7,8",
++        "mtu": "9100",
++        "speed": "40000"
++    },
++    "PORT|Ethernet8": {
++        "alias": "Eth3/1",
++        "index": "3",
++        "lanes": "9,10,11,12",
++        "speed": "100000"
++    },
++    "VERSIONS|DATABASE": {
++        "VERSION": "version_202605_01"
++    }
++}
+diff --git a/tests/db_migrator_input/config_db/port_valid_speeds_input.json b/tests/db_migrator_input/config_db/port_valid_speeds_input.json
+new file mode 100644
+index 00000000..9691c9ae
+--- /dev/null
++++ b/tests/db_migrator_input/config_db/port_valid_speeds_input.json
+@@ -0,0 +1,27 @@
++{
++    "PORT|Ethernet0": {
++        "alias": "Eth1/1",
++        "index": "1",
++        "lanes": "1,2,3,4",
++        "speed": "100000",
++        "valid_speeds": "100000,40000"
++    },
++    "PORT|Ethernet4": {
++        "admin_status": "up",
++        "alias": "Eth2/1",
++        "index": "2",
++        "lanes": "5,6,7,8",
++        "mtu": "9100",
++        "speed": "40000",
++        "valid_speeds": "100000,40000"
++    },
++    "PORT|Ethernet8": {
++        "alias": "Eth3/1",
++        "index": "3",
++        "lanes": "9,10,11,12",
++        "speed": "100000"
++    },
++    "VERSIONS|DATABASE": {
++        "VERSION": "version_202605_01"
++    }
++}
+diff --git a/tests/db_migrator_test.py b/tests/db_migrator_test.py
+index c6c85cd4..81c19835 100644
+--- a/tests/db_migrator_test.py
++++ b/tests/db_migrator_test.py
+@@ -1149,3 +1149,35 @@ class TestIPinIPTunnelEcnModeMigrator(object):
+         expected_state_db = SonicV2Connector(host='127.0.0.1')
+         expected_state_db.connect(expected_state_db.STATE_DB)
+         self.compare_keys(expected_state_db, dbmgtr.stateDB, 'STATE_DB')
++
++
++class TestPortValidSpeedsMigrator(object):
++    def setup_method(self):
++        self.version_info = mock.patch.object(device_info, 'get_sonic_version_info',
++                                              return_value={'asic_type': 'broadcom'})
++        self.version_info.start()
++        dbconnector.dedicated_dbs['CONFIG_DB'] = os.path.join(mock_db_path, 'config_db', 'port_valid_speeds_input')
++
++    def teardown_method(self):
++        dbconnector.dedicated_dbs['CONFIG_DB'] = None
++        self.version_info.stop()
++
++    def expected_port_table(self):
++        dbconnector.dedicated_dbs['CONFIG_DB'] = os.path.join(mock_db_path, 'config_db', 'port_valid_speeds_expected')
++        return Db().cfgdb.get_table('PORT')
++
++    def test_port_valid_speeds_migrator(self):
++        import db_migrator
++        dbmgtr = db_migrator.DBMigrator(None)
++        dbmgtr.migrate()
++        resulting_table = dbmgtr.configDB.get_table('PORT')
++        assert not DeepDiff(resulting_table, self.expected_port_table(), ignore_order=True)
++        assert dbmgtr.get_version() == dbmgtr.CURRENT_VERSION
++
++    def test_port_valid_speeds_migrator_idempotent(self):
++        import db_migrator
++        dbmgtr = db_migrator.DBMigrator(None)
++        dbmgtr.migrate_port_valid_speeds()
++        dbmgtr.migrate_port_valid_speeds()
++        resulting_table = dbmgtr.configDB.get_table('PORT')
++        assert not DeepDiff(resulting_table, self.expected_port_table(), ignore_order=True)
+-- 
+2.47.3
+
