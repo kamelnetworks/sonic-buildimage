@@ -31,10 +31,54 @@ class Thermal(ThermalBase):
         ['PSU2 Airflow Sensor', 0x8]
     ]
 
+    # Thresholds, in Celsius, for sensors whose BMC sensor data record
+    # carries none: { Sensor-Name: (high, high critical) }. The S5232F BMC
+    # (Celestica, firmware 0.55) reports no thresholds at all for the
+    # 'ASIC On-board' sensor (NPU_Near_temp, 0x2), so get_high_threshold()
+    # fell through to the base class, thermalctld stored 'N/A' and
+    # system-health stayed Not OK with 'Invalid ASIC On-board temperature
+    # data ... threshold=N/A'. The values are the ones Dell's BMC reports for
+    # the same sensor on the sister S5248F-ON: 78 C upper non-critical and
+    # 80 C upper critical (85 C upper non-recoverable). A threshold the BMC
+    # does report always takes precedence over this table. The thresholds
+    # can't be repaired on the BMC instead: its SDR marks none of them
+    # settable for this sensor, and Set Sensor Threshold is refused with
+    # 0xCD (command illegal for specified sensor). A failed BMC read is not
+    # replaced by these defaults, see _get_upper_threshold().
+    DEFAULT_THRESHOLDS = {
+        'ASIC On-board': (78.0, 80.0),
+    }
+
     def __init__(self, thermal_index=0):
         ThermalBase.__init__(self)
         self.index = thermal_index + 1
         self.sensor = IpmiSensor(self.SENSOR_MAPPING[self.index - 1][1])
+
+    def _get_upper_threshold(self, threshold_type, position):
+        """
+        Returns the BMC's threshold of the given type, else this sensor's
+        platform default if the BMC has no such threshold, as a float.
+        position is 0 for the high threshold and 1 for the high critical
+        threshold in DEFAULT_THRESHOLDS.
+
+        Returns None if the threshold could not be read from the BMC
+        (ipmitool failed, short reply): thermalctld then stores 'N/A' and
+        system-health reports the ASIC as Not OK, a failed read never
+        passes as the default. Raises NotImplementedError if the BMC has
+        no such threshold and there is no default.
+        """
+        is_valid, threshold = self.sensor.get_threshold(threshold_type)
+        if is_valid:
+            return float(threshold)
+
+        if self.sensor.is_threshold_readable(threshold_type) is not False:
+            return None
+
+        defaults = self.DEFAULT_THRESHOLDS.get(self.get_name())
+        if defaults is None:
+            raise NotImplementedError
+
+        return float(defaults[position])
 
     def get_name(self):
         """
@@ -92,7 +136,10 @@ class Thermal(ThermalBase):
         """
         is_valid, temperature = self.sensor.get_reading()
         if not is_valid:
-            temperature = 0
+            # A failed BMC read is not a temperature: None makes
+            # thermalctld store 'N/A', which system-health reports as
+            # Not OK, instead of 0 C, which it reported as fine.
+            return None
 
         return float(temperature)
 
@@ -105,11 +152,7 @@ class Thermal(ThermalBase):
             Celsius up to nearest thousandth of one degree Celsius,
             e.g. 30.125
         """
-        is_valid, high_threshold = self.sensor.get_threshold("UpperNonCritical")
-        if not is_valid:
-            return super(Thermal, self).get_high_threshold()
-
-        return float(high_threshold)
+        return self._get_upper_threshold("UpperNonCritical", 0)
 
     def get_low_threshold(self):
         """
@@ -134,11 +177,7 @@ class Thermal(ThermalBase):
             thermal in Celsius up to nearest thousandth of one degree
             Celsius, e.g. 30.125
         """
-        is_valid, high_crit_threshold = self.sensor.get_threshold("UpperCritical")
-        if not is_valid:
-            return super(Thermal, self).get_high_critical_threshold()
-
-        return float(high_crit_threshold)
+        return self._get_upper_threshold("UpperCritical", 1)
 
     def set_high_threshold(self, temperature):
         """
