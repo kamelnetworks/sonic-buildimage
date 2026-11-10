@@ -88,11 +88,13 @@ function ebtables_config()
 {
     if [[ "$DEV" && $DATABASE_TYPE != "dpudb" ]]; then
         # Install ebtables filter in namespaces on multi-asic.
-        ip netns exec $NET_NS ebtables-restore < /etc/ebtables.filter.cfg
+        ip netns exec "$NET_NS" ebtables-restore < /etc/ebtables.filter.cfg || return 1
+        ip netns exec "$NET_NS" nft -f /etc/bridge-nd-filter.nft || return 1
     else
         if [[ ! ($NUM_ASIC -gt 1) ]]; then
             # Install ebtables filter in host for single asic.
-            ebtables-restore < /etc/ebtables.filter.cfg
+            ebtables-restore < /etc/ebtables.filter.cfg || return 1
+            nft -f /etc/bridge-nd-filter.nft || return 1
         fi
     fi
 }
@@ -315,7 +317,7 @@ function postStartAction()
 
     # Setup ebtables configuration
 {%- if sonic_asic_platform != "vs" %}
-    ebtables_config
+    ebtables_config || { echo "Failed to configure bridge packet filters" >&2; exit 1; }
 {%- endif %}
     # chassisdb starts before database starts, bypass the PING check since other
     # databases are not availbale until database container is ready.

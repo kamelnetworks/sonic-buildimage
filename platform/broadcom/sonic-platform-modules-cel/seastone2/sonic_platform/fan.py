@@ -235,7 +235,7 @@ class Fan(FanBase):
             0x2: red
             0x3: off
         """
-        status = NOT_AVAILABLE
+        led = NOT_AVAILABLE
         color_dict = {\
             0: self.STATUS_LED_COLOR_OFF,\
             1: self.STATUS_LED_COLOR_AMBER,\
@@ -244,12 +244,12 @@ class Fan(FanBase):
 
         if not self.is_psu_fan:
             cmd = IPMI_GET_STATUS_LED.format(self._fan_led_offset)
-            status, output = self._api_helper.run_command(cmd) 
+            status, output = self._api_helper.run_command(cmd)
             if status:
                 color = int(output, 16)
-                status = color_dict.get(color, status)
- 
-        return status
+                led = color_dict.get(color, NOT_AVAILABLE)
+
+        return led
 
 
     ##############################################################

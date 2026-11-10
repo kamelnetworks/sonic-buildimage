@@ -85,12 +85,12 @@ The slave also starts with unlimited nproc because the image's Docker startup
 requests it in the chroot. Setting it at container creation keeps native-daemon
 builds working without adding CAP_SYS_RESOURCE to the slave.
 
-SONiC package logging detaches recipes from the container terminal. Libyang's
-interactive Tcl suite therefore executes zero tests and reports file-level stdout
-errors even though CTest returns success. Docker --tty does not fix this. Verify
-that suite separately on a copy of the built tree under a real pseudo-terminal
-with script -qec 'ctest -R yanglint_interactive -V' /dev/null, and inspect both
-test counts and file errors. See HANDOFF.txt for the observed results.
+SONiC package logging detaches recipes from the container terminal (stdin is
+/dev/null, no controlling tty). Libyang's yanglint Tcl suites used to execute
+zero tests under those conditions while CTest reported success; the harness
+is patched in src/libyang3/patch/0002-yanglint-tests-without-controlling-tty.patch
+so that the suite runs and fails properly without a terminal. Check the
+yanglint_interactive counts in the package log when touching libyang3.
 Native builds unmask container system paths so libnl's user/network namespace
 tests can mount a fresh read-only sysfs.
 

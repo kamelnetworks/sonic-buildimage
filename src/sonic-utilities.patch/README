@@ -1,0 +1,16 @@
+The ACL MAC patch is carried by explicit release-owner decision in #175.
+Its 0002 prefix reserves 0001 for the independently reviewed NTP proposal
+in #164; it does not enable or approve that proposal (#129).
+
+If #164 is approved, preserve every carried patch file and every series entry
+when resolving its add/add series conflict. Never choose one side wholesale.
+Run the patch-series application checks and the sonic-utilities ACL/NTP tests
+against the resulting series and the pinned sonic-utilities source.
+
+0003 exposes APPL_DB remote-VNI requests without a matching same-namespace
+STATE_DB tunnel entry (issue #187, partial observability follow-up to #73).
+It preserves existing operational-state rows and count semantics, and does
+not infer ASIC state or a capacity/failure diagnosis from missing tunnel state.
+The carried CLI tests cover multiple VNIs, IPv6, namespace isolation and
+empty/deleted/partial records. Keep it alongside the ACL patch and any
+independently approved NTP patch when resolving series conflicts.
