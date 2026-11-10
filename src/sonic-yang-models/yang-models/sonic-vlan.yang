@@ -274,8 +274,10 @@ module sonic-vlan {
 				}
 
 				leaf mtu {
+					description "The kernel Vlan interface sits on the Bridge,
+						whose mtu vlanmgrd fixes at 9100, and refuses a larger mtu.";
 					type uint16 {
-						range 1..9216;
+						range 1..9100;
 					}
 				}
 

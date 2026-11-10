@@ -463,7 +463,7 @@
             "Vlan100": {
                 "description": "vxlan",
                 "vlanid": "100",
-                "mtu": "9216",
+                "mtu": "9100",
                 "admin_status": "up"
             },
             "Vlan111": {
@@ -475,7 +475,7 @@
                     "2a04:5555:41::11"
                 ],
                 "vlanid": "111",
-                "mtu": "9216",
+                "mtu": "9100",
                 "admin_status": "up"
             },
             "Vlan777": {
@@ -487,7 +487,7 @@
                     "2a04:5555:41::11"
                 ],
                 "vlanid": "777",
-                "mtu": "9216",
+                "mtu": "9100",
                 "admin_status": "up"
             },
             "Vlan12": {
@@ -496,7 +496,7 @@
                     "12.1.1.1"
                 ],
                 "vlanid": "12",
-                "mtu": "9216",
+                "mtu": "9100",
                 "admin_status": "up"
             }
 
