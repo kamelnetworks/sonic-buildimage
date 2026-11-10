@@ -461,6 +461,42 @@ do_db_migration()
     fi
 }
 
+# Succeed if CONFIG_DB matches the config_db file on disk in every namespace,
+# independent of key order and formatting
+config_db_matches_files()
+{
+    local asic_num=0
+
+    cmp -s <(jq -S . ${CONFIG_DB_JSON} 2>/dev/null) \
+           <(sonic-cfggen -d --print-data 2>/dev/null | jq -S . 2>/dev/null) || return 1
+    while [[ ($asic_num -lt $NUM_ASIC) && ($NUM_ASIC -gt 1) ]]; do
+        cmp -s <(jq -S . ${CONFIG_DB_PATH}${CONFIG_DB_PREFIX}$asic_num${CONFIG_DB_SUFFIX} 2>/dev/null) \
+               <(sonic-cfggen -n "asic$asic_num" -d --print-data 2>/dev/null | jq -S . 2>/dev/null) || return 1
+        ((asic_num = asic_num + 1))
+    done
+}
+
+# Save CONFIG_DB if the load and migration of the old image's config_db.json
+# changed it. config reload validates the file against the YANG models before
+# it loads anything, and db_migrator only changes CONFIG_DB, so without the
+# save a config the old image wrote keeps failing every later "config reload"
+# (kamelnetworks/sonic-buildimage#136). config reload already runs db_migrator
+# after loading, so CONFIG_DB is compared with the file, not with itself
+# before do_db_migration. This only runs on the first boot into a new image;
+# the database container runs db_migrator again at every cold boot without
+# saving.
+save_migrated_config()
+{
+    if config_db_matches_files; then
+        return 0
+    fi
+
+    echo "Migrated CONFIG_DB differs from config_db.json, saving it..."
+    if ! config save -y; then
+        logger -t config-setup -p user.warning "Failed to save the migrated config; run 'config save -y' by hand."
+    fi
+}
+
 # Perform configuration migration from backup copy.
 #  - This step is performed when a new image is installed and SONiC switch boots into it
 do_config_migration()
@@ -488,8 +524,13 @@ do_config_migration()
         exit 0
     elif check_all_config_db_present; then
         echo "Use config_db.json from old system..."
-        reload_configdb
-        do_db_migration
+        # Don't save over the file if it could not be loaded at all
+        if reload_configdb; then
+            do_db_migration
+            save_migrated_config
+        else
+            do_db_migration
+        fi
     elif [ -r ${MINGRAPH_FILE} ]; then
         echo "Use minigraph.xml from old system..."
         reload_minigraph
