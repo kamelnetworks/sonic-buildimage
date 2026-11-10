@@ -338,9 +338,9 @@ static ssize_t qsfp_lpmode_show(struct device *dev, struct device_attribute *att
     mutex_lock(drvdata->lock);
     i2c_smbus_write_byte_data(client, PORT_SL_ADDR, portid);
     value = i2c_smbus_read_byte_data(client, PORT_CR_ADDR);
+    mutex_unlock(drvdata->lock);
     if(value < 0)
         return value;
-    mutex_unlock(drvdata->lock);
     return sprintf(buf, "%d\n",(value >> CTRL_LPMD) & 0x01);
 
 }

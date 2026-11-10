@@ -1,4 +1,5 @@
 {
-    "_comment": "skip_ledd: the Silverstone-X port LEDs are driven by the switchboard FPGA/CPLD from link state, like every other Celestica platform in this tree. The switch CPLD only exposes a global port_led_mode (normal/test) and port_led_color override (i2c_switchcpld.c), so there is no per-port LED control for a led_control plugin to use, and without plugins/led_control.py ledd exits FATAL on every boot (kamelnetworks/sonic-buildimage#106). Keys here are top-level variables of docker-pmon.supervisord.conf.j2 via sonic-cfggen -j; unknown keys such as this comment are ignored.",
-    "skip_ledd": true
+    "_comment": "skip_ledd: the Silverstone-X port LEDs are driven by the switchboard FPGA/CPLD from link state, like every other Celestica platform in this tree. The switch CPLD only exposes a global port_led_mode (normal/test) and port_led_color override (i2c_switchcpld.c), so there is no per-port LED control for a led_control plugin to use, and without plugins/led_control.py ledd exits FATAL on every boot (kamelnetworks/sonic-buildimage#106). enable_xcvrd_sff_mgr: let xcvrd's SffManagerTask take the QSFP28/QSFP+ optics out of low-power mode and enable their TX via the EEPROM once the port is admin up (kamelnetworks/sonic-buildimage#100); the CMIS manager stays on for the QSFP-DD cages. Keys here are top-level variables of docker-pmon.supervisord.conf.j2 via sonic-cfggen -j; unknown keys such as this comment are ignored.",
+    "skip_ledd": true,
+    "enable_xcvrd_sff_mgr": true
 }
