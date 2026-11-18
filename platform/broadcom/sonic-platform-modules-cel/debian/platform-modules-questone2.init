@@ -11,6 +11,34 @@
 # Short-Description: Setup questone2 board.
 ### END INIT INFO
 
+# R1N26A uses Questone_2 lanes with a different front-panel LED chain.
+# Keep generic SKU data, regular LED files and non-stock LED links intact.
+select_hpe_led() {
+    local platform_path="$1" board_label="$2" selected_hwsku
+    local led_link="${platform_path}/custom_led.bin"
+    local led_target="./Questone_2/custom_led_hpe_r1n26a.bin"
+
+    # R1N25A has not been validated with this LED program.
+    [ "$board_label" = "R1N26A" ] || return 0
+    read -r selected_hwsku _ < "${platform_path}/default_sku" || return 0
+    [ "$selected_hwsku" = "Questone_2" ] || return 0
+    [ -f "${platform_path}/${led_target}" ] || return 0
+
+    if [ -L "$led_link" ]; then
+        case "$(readlink "$led_link")" in
+            "$led_target") return 0 ;;
+            ./Questone_2/custom_led.bin|Questone_2/custom_led.bin|\
+            ./Questone_2A/custom_led.bin|Questone_2A/custom_led.bin|\
+            "${platform_path}/Questone_2/custom_led.bin"|\
+            "${platform_path}/Questone_2A/custom_led.bin") ;;
+            *) return 0 ;;
+        esac
+    elif [ -e "$led_link" ]; then
+        return 0
+    fi
+    ln -sfn "$led_target" "$led_link"
+}
+
 
 case "$1" in
 start)
@@ -46,13 +74,12 @@ start)
     # One platform support two hwskus, auto select the correct hwsku
     # If label is not either Questone-II or Questone-IIA, then Questone-IIA is used by default
     # Also, the Arctica NX4808xxv and R1N25A is a branded Questone-II.
-    hwsku_file="/usr/share/sonic/device/x86_64-cel_questone_2-r0/default_sku"
+    platform_path="/usr/share/sonic/device/x86_64-cel_questone_2-r0"
+    hwsku_file="${platform_path}/default_sku"
+    sleep 1 # Wait for EEPROM driver initialization
+    hwsku=$(decode-syseeprom | grep "Label" | awk '{print $5 $6}')
+
     if [ ! -f $hwsku_file ]; then
-        platform_path="/usr/share/sonic/device/x86_64-cel_questone_2-r0"
-
-        sleep 1 # Wait for EEPROM driver initialization
-        hwsku=$(decode-syseeprom | grep "Label" | awk '{print $5 $6}')
-
         cd ${platform_path}
         if [ x$hwsku = x"Questone-II" ] || [ x$hwsku = x"ArcticaNX4808xxv" ] || \
            [ x$hwsku = x"R1N25A" ] || [ x$hwsku = x"R1N26A" ]; then
@@ -67,6 +94,9 @@ start)
             ln -sf ./Questone_2A/custom_led.bin custom_led.bin
         fi
     fi
+
+    # Also select the HPE program when an upgrade retained default_sku.
+    select_hpe_led "$platform_path" "$hwsku"
 
     # SONiC LED control policy
     ipmitool raw 0x3a 0x0f 0x02 0x00
