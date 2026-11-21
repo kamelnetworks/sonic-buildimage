@@ -452,11 +452,11 @@ static ssize_t set_fpga_reg_value(struct device *dev,
     uint32_t value;
     uint32_t mode = 8;
     char *tok;
-    char clone[count];
+    char clone[count + 1];
     char *pclone = clone;
     ssize_t status;
 
-    strcpy(clone, buf);
+    strscpy(clone, buf, sizeof(clone));
 
     mutex_lock(&fpga_data->fpga_lock);
     tok = strsep((char**)&pclone, " ");
@@ -613,12 +613,12 @@ static ssize_t cpld1_setreg_store(struct device *dev,
 
     uint8_t addr, value;
     char *tok;
-    char clone[count];
+    char clone[count + 1];
     char *pclone = clone;
     ssize_t status;
     int err;
 
-    strcpy(clone, buf);
+    strscpy(clone, buf, sizeof(clone));
 
     tok = strsep((char**)&pclone, " ");
     if (tok == NULL) {
@@ -737,12 +737,12 @@ static ssize_t cpld2_setreg_store(struct device *dev,
 {
     uint8_t addr, value;
     char *tok;
-    char clone[count];
+    char clone[count + 1];
     char *pclone = clone;
     ssize_t status;
     int err;
 
-    strcpy(clone, buf);
+    strscpy(clone, buf, sizeof(clone));
 
     tok = strsep((char**)&pclone, " ");
     if (tok == NULL) {
