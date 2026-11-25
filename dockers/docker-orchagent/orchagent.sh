@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 
-HWSKU_DIR=/usr/share/sonic/hwsku
-PLATFORM_ENV_CONF=/usr/share/sonic/platform/platform_env.conf
-SWSS_VARS_FILE=/usr/share/sonic/templates/swss_vars.j2
+HWSKU_DIR=${HWSKU_DIR:-/usr/share/sonic/hwsku}
+PLATFORM_ENV_CONF=${PLATFORM_ENV_CONF:-/usr/share/sonic/platform/platform_env.conf}
+SWSS_VARS_FILE=${SWSS_VARS_FILE:-/usr/share/sonic/templates/swss_vars.j2}
+PROC_CMDLINE=${PROC_CMDLINE:-/proc/cmdline}
 
 # Retrieve SWSS vars from sonic-cfggen
 SWSS_VARS=$(sonic-cfggen -d -y /etc/sonic/sonic_version.yml -t $SWSS_VARS_FILE) || exit 1
@@ -52,8 +53,9 @@ if [ "$MAC_ADDRESS" == "None" ] || [ -z "$MAC_ADDRESS" ]; then
 fi
 
 # Create a folder for SwSS record files
-mkdir -p /var/log/swss
-ORCHAGENT_ARGS="-d /var/log/swss "
+SWSS_LOG_DIR=${SWSS_LOG_DIR:-/var/log/swss}
+mkdir -p "$SWSS_LOG_DIR"
+ORCHAGENT_ARGS="-d $SWSS_LOG_DIR "
 readonly DPU_BATCH_SIZE=125000
 
 LOCALHOST_SWITCHTYPE=`sonic-db-cli -s CONFIG_DB hget "DEVICE_METADATA|localhost" "switch_type"`
@@ -138,13 +140,35 @@ elif [ "$platform" == "pensando" ]; then
     ORCHAGENT_ARGS+="-m $MAC_ADDRESS"
 elif [ "$platform" == "marvell-prestera" ]; then
     ORCHAGENT_ARGS+="-m $MAC_ADDRESS"
-    CREATE_SWITCH_TIMEOUT=`cat $HWSKU_DIR/sai.profile | grep "createSwitchTimeout" | cut -d'=' -f 2`
-    if [[ ! -z $CREATE_SWITCH_TIMEOUT ]]; then
-        ORCHAGENT_ARGS+=" -t $CREATE_SWITCH_TIMEOUT"
-    fi
 else
     # Should we use the fallback MAC in case it is not found in Device.Metadata
     ORCHAGENT_ARGS+="-m $MAC_ADDRESS"
+fi
+
+# Honour createSwitchTimeout on every platform; leave ORCHAGENT_ARGS unchanged
+# when unset. Precedence:
+#   1. kernel cmdline sonic_orchagent_create_timeout=<seconds|stock>
+#   2. $PLATFORM_ENV_CONF createSwitchTimeout=<seconds>
+#   3. $HWSKU_DIR/sai.profile createSwitchTimeout=<seconds>
+CREATE_SWITCH_TIMEOUT=""
+CMDLINE_CREATE_TIMEOUT=""
+if [ -r "$PROC_CMDLINE" ]; then
+    CMDLINE_CREATE_TIMEOUT=$(tr ' ' '\n' < "$PROC_CMDLINE" | awk -F= '$1 == "sonic_orchagent_create_timeout" {val=$2} END {print val}' | tr -d '[:space:]')
+fi
+if [ "$CMDLINE_CREATE_TIMEOUT" = "stock" ]; then
+    CREATE_SWITCH_TIMEOUT=""
+elif [[ "$CMDLINE_CREATE_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+    CREATE_SWITCH_TIMEOUT="$CMDLINE_CREATE_TIMEOUT"
+else
+    if [ -f "$PLATFORM_ENV_CONF" ]; then
+        CREATE_SWITCH_TIMEOUT=$(awk -F= '/^[[:space:]]*createSwitchTimeout[[:space:]]*=/ {val=$2} END {print val}' "$PLATFORM_ENV_CONF" | tr -d '[:space:]')
+    fi
+    if [ -z "$CREATE_SWITCH_TIMEOUT" ] && [ -f "$HWSKU_DIR/sai.profile" ]; then
+        CREATE_SWITCH_TIMEOUT=$(awk -F= '/^[[:space:]]*createSwitchTimeout[[:space:]]*=/ {val=$2} END {print val}' "$HWSKU_DIR/sai.profile" | tr -d '[:space:]')
+    fi
+fi
+if [[ "$CREATE_SWITCH_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+    ORCHAGENT_ARGS+=" -t $CREATE_SWITCH_TIMEOUT"
 fi
 
 # Enable the shared northbound ZMQ listener for route and DASH producers.
@@ -182,8 +206,8 @@ fi
 # Enable SAI MACSec POST when:
 # - FIPS is enabled in SONiC (either in /proc/cmdline or /etc/fips/fips_enable); AND
 # - MACSec is enabled on platform.
-if grep -q "sonic_fips=1" /proc/cmdline || grep -q "1" /etc/fips/fips_enable ; then
-    [ -f $PLATFORM_ENV_CONF ] && . $PLATFORM_ENV_CONF
+if grep -q "sonic_fips=1" "$PROC_CMDLINE" 2>/dev/null || grep -q "1" "${FIPS_ENABLE_FILE:-/etc/fips/fips_enable}" 2>/dev/null ; then
+    [ -f "$PLATFORM_ENV_CONF" ] && . "$PLATFORM_ENV_CONF"
     if [[ $macsec_enabled -eq 1 ]]; then
         ORCHAGENT_ARGS+=" -M"
     fi
@@ -192,4 +216,4 @@ fi
 # Mask SIGHUP signal to avoid orchagent termination by logrotate before orchagent registers its handler.
 trap '' SIGHUP
 
-exec /usr/bin/orchagent ${ORCHAGENT_ARGS}
+exec "${ORCHAGENT_BIN:-/usr/bin/orchagent}" ${ORCHAGENT_ARGS}
